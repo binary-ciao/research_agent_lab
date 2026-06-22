@@ -32,15 +32,16 @@ class ExperimentOrchestratorAgent(Agent):
         ae = AutonomousExperimentAgent()
         ad = AutoDebuggerAgent()
 
+        state.values["code_patches_by_experiment_id"] = state.values.get("code_patches_by_experiment_id", {})
+        state.values["pending_fixes_by_experiment_id"] = state.values.get("pending_fixes_by_experiment_id", {})
+        state.values["last_debug_records_by_experiment_id"] = state.values.get("last_debug_records_by_experiment_id", {})
+
         for plan in plans:
             if not isinstance(plan, dict):
                 continue
             experiment_id = plan.get("experiment_id", "unknown")
 
-            state.values["code_patches_by_experiment_id"] = state.values.get("code_patches_by_experiment_id", {})
-            state.values["pending_fixes_by_experiment_id"] = state.values.get("pending_fixes_by_experiment_id", {})
-            state.values["last_debug_records_by_experiment_id"] = state.values.get("last_debug_records_by_experiment_id", {})
-
+            # Clear per-experiment stale state from previous runs
             state.values["pending_fixes_by_experiment_id"].pop(experiment_id, None)
             state.values["last_debug_records_by_experiment_id"].pop(experiment_id, None)
 
