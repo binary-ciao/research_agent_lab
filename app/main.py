@@ -60,6 +60,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow AutonomousExperimentAgent to execute commands on the target codebase",
     )
     run_parser.add_argument(
+        "--enable-code-writes",
+        action="store_true",
+        help="Allow CodeWriterAgent to write code files",
+    )
+    run_parser.add_argument(
+        "--max-debug-attempts",
+        type=int,
+        default=3,
+        help="Maximum auto-debug retry attempts per experiment",
+    )
+    run_parser.add_argument(
         "--enable-tree-search",
         action="store_true",
         help="Allow TreeSearchAgent to generate branch experiment plans on failure",
@@ -215,6 +226,8 @@ def run_workflow(args: argparse.Namespace) -> int:
         llm_call_budget=args.llm_call_budget,
         llm_token_budget=args.llm_token_budget,
         enable_experiments=args.enable_experiments,
+        enable_code_writes=args.enable_code_writes,
+        max_debug_attempts=args.max_debug_attempts,
         enable_tree_search=args.enable_tree_search,
         literature_memory_store=lit_memory,
         max_parallel_branches=args.max_parallel_branches,

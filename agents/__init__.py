@@ -1,10 +1,13 @@
 """Research workflow agents."""
 
+from agents.auto_debugger import AutoDebuggerAgent
 from agents.autonomous_experiment import AutonomousExperimentAgent
 from agents.branch_selection_agent import BranchSelectionAgent
+from agents.code_writer import CodeWriterAgent
 from agents.codebase_analyzer import CodebaseAnalyzerAgent
 from agents.developer_agent import DeveloperAgent
 from agents.experiment_decision import ExperimentDecisionAgent
+from agents.experiment_orchestrator import ExperimentOrchestratorAgent
 from agents.evidence_checker import EvidenceCheckerAgent
 from agents.experiment_planner import ExperimentPlannerAgent
 from agents.literature_memory_agent import LiteratureMemoryPersistenceAgent
@@ -27,12 +30,15 @@ from agents.tree_pruner import TreePrunerAgent
 from agents.tree_search_agent import BranchToPlanAgent, TreeSearchAgent
 
 __all__ = [
+    "AutoDebuggerAgent",
     "AutonomousExperimentAgent",
     "BranchSelectionAgent",
     "BranchToPlanAgent",
     "CodebaseAnalyzerAgent",
+    "CodeWriterAgent",
     "DeveloperAgent",
     "ExperimentDecisionAgent",
+    "ExperimentOrchestratorAgent",
     "EvidenceCheckerAgent",
     "ExperimentPlannerAgent",
     "LiteratureMemoryPersistenceAgent",

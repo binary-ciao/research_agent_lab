@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from agents import (
-    AutonomousExperimentAgent,
     BranchSelectionAgent,
     BranchToPlanAgent,
     CodebaseAnalyzerAgent,
     DeveloperAgent,
     ExperimentDecisionAgent,
+    ExperimentOrchestratorAgent,
     EvidenceCheckerAgent,
     ExperimentPlannerAgent,
     LiteratureMemoryPersistenceAgent,
@@ -43,6 +43,8 @@ def build_full_research_workflow(
     llm_call_budget: int | None = None,
     llm_token_budget: int | None = None,
     enable_experiments: bool = False,
+    enable_code_writes: bool = False,
+    max_debug_attempts: int = 3,
     enable_tree_search: bool = False,
     literature_memory_store: object = None,
     max_parallel_branches: int = 1,
@@ -79,7 +81,7 @@ def build_full_research_workflow(
         agents.append(BranchSelectionAgent(lit_memory_store=literature_memory_store))
         agents.append(BranchToPlanAgent())
     agents.append(DeveloperAgent())
-    agents.append(AutonomousExperimentAgent())
+    agents.append(ExperimentOrchestratorAgent())
     agents.append(ExperimentDecisionAgent())
     # TreeSearchAgent runs after experiment decision to generate new branches
     # or write back results.
@@ -100,6 +102,8 @@ def build_full_research_workflow(
             "max_papers": max_papers,
             "enable_llm": enable_llm,
             "enable_experiments": enable_experiments,
+            "enable_code_writes": enable_code_writes,
+            "max_debug_attempts": max_debug_attempts,
             "llm_call_budget": llm_call_budget,
             "llm_token_budget": llm_token_budget,
             "llm_calls_used": 0,
