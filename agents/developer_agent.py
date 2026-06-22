@@ -23,6 +23,10 @@ class DeveloperAgent(Agent):
             protected_paths=state.topic.protected_files(),
             proposed_files=plan.get("files_to_change", []),
             implementation_notes=[
+                f"Goal: {plan.get('hypothesis', '')}",
+                f"Change: {plan.get('modification', '')}",
+                f"Files: {', '.join(plan.get('files_to_change', []))}",
+                f"Baseline: {plan.get('baseline', '')}",
                 "Read target repository before editing.",
                 "Generate a narrow patch for one experiment only.",
                 "Run the configured smoke test before full training.",
