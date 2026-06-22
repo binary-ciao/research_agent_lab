@@ -139,5 +139,58 @@ class ResultParserTest(TestCase):
         self.assertAlmostEqual(r.metrics["ade"], 0.40)
 
 
+class CriteriaCheckTest(TestCase):
+    def test_check_criteria_metric_pass(self):
+        from agents.result_parser import _check_criteria
+        metrics = {"ade": 0.30}
+        criteria = {"mode": "metric", "metrics": [{"name": "ade", "target": 0.50, "direction": "lte"}]}
+        passed, results = _check_criteria(metrics, criteria)
+        self.assertTrue(passed)
+        self.assertTrue(results[0]["pass"])
+
+    def test_check_criteria_metric_fail(self):
+        from agents.result_parser import _check_criteria
+        metrics = {"ade": 0.90}
+        criteria = {"mode": "metric", "metrics": [{"name": "ade", "target": 0.50, "direction": "lte"}]}
+        passed, results = _check_criteria(metrics, criteria)
+        self.assertFalse(passed)
+        self.assertFalse(results[0]["pass"])
+
+    def test_check_criteria_bad_target_no_crash(self):
+        from agents.result_parser import _check_criteria
+        metrics = {"ade": 0.30}
+        criteria = {"mode": "metric", "metrics": [{"name": "ade", "target": "bad"}]}
+        passed, results = _check_criteria(metrics, criteria)
+        self.assertFalse(passed)
+
+    def test_check_criteria_empty_metrics(self):
+        from agents.result_parser import _check_criteria
+        passed, results = _check_criteria({}, {"mode": "metric", "metrics": []})
+        self.assertTrue(passed)
+
+    def test_check_criteria_direction_lte(self):
+        from agents.result_parser import _check_criteria
+        metrics = {"ade": 0.30}
+        criteria = {"mode": "metric", "metrics": [{"name": "ade", "target": 0.50, "direction": "lte"}]}
+        passed, results = _check_criteria(metrics, criteria)
+        self.assertTrue(passed)
+
+    def test_pattern_extract_fallback(self):
+        from agents.result_parser import _check_criteria
+        metrics = {}
+        criteria = {"mode": "metric", "metrics": [{"name": "accuracy", "target": 0.9, "direction": "gte", "pattern": r"Accuracy:\s*([0-9.]+)"}]}
+        text = "Epoch 10 complete. Accuracy: 0.95"
+        passed, results = _check_criteria(metrics, criteria, text)
+        self.assertTrue(passed)
+        self.assertEqual(results[0]["actual"], 0.95)
+
+    def test_bad_pattern_no_crash(self):
+        from agents.result_parser import _check_criteria
+        metrics = {}
+        criteria = {"mode": "metric", "metrics": [{"name": "acc", "target": 0.9, "pattern": r"[invalid"}]}
+        passed, results = _check_criteria(metrics, criteria, "some text")
+        self.assertFalse(passed)
+
+
 if __name__ == "__main__":
     main()

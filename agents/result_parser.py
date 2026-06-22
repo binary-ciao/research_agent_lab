@@ -24,6 +24,50 @@ _STATUS_FAILED_PATTERNS = [
 _LOG_TAIL_CHARS = 2000
 
 
+def _extract_success_metric(text: str, metric_spec: dict) -> float | None:
+    pattern = metric_spec.get("pattern")
+    if not pattern:
+        return None
+    try:
+        match = re.search(str(pattern), text, re.IGNORECASE)
+    except re.error:
+        return None
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except (IndexError, TypeError, ValueError):
+        return None
+
+
+def _check_criteria(metrics: dict[str, float], criteria: dict, text: str = "") -> tuple[bool, list[dict]]:
+    targets = criteria.get("metrics", [])
+    if not targets:
+        return True, []
+    results = []
+    for t in targets:
+        if not isinstance(t, dict):
+            continue
+        name = str(t.get("name", "")).lower()
+        if not name:
+            continue
+        actual = metrics.get(name)
+        if actual is None:
+            actual = _extract_success_metric(text, t)
+        if actual is None:
+            results.append({"metric": name, "pass": False, "reason": "not found"})
+            continue
+        try:
+            target = float(t.get("target", 0))
+        except (TypeError, ValueError):
+            results.append({"metric": name, "pass": False, "reason": f"bad target: {t.get('target')}"})
+            continue
+        direction = t.get("direction", "gte")
+        ok = actual >= target if direction != "lte" else actual <= target
+        results.append({"metric": name, "actual": actual, "target": target, "pass": ok})
+    return all(r["pass"] for r in results), results
+
+
 def parse_experiment_output(
     experiment_id: str,
     stdout: str,
@@ -32,6 +76,7 @@ def parse_experiment_output(
     command: str,
     expected_metrics: list[str] | None = None,
     duration_seconds: float = 0.0,
+    success_criteria: dict | None = None,
 ) -> ExperimentResult:
     combined = f"{stdout}\n{stderr}"
     result = ExperimentResult(
@@ -68,6 +113,18 @@ def parse_experiment_output(
         result.notes.append("no metrics found in output; check log_tail")
 
     result.log_tail = combined[-_LOG_TAIL_CHARS:]
+
+    if success_criteria and isinstance(success_criteria, dict):
+        criteria_mode = str(success_criteria.get("mode", ""))
+        if criteria_mode in {"metric", "both"}:
+            criteria_pass, criteria_results = _check_criteria(
+                result.metrics, success_criteria, combined
+            )
+            result.criteria_results = criteria_results
+            if not criteria_pass and result.status == "passed":
+                result.status = "failed"
+                result.notes.append("criteria not met")
+
     return result
 
 
