@@ -72,6 +72,36 @@ class CodeWriterAgentTest(TestCase):
         )
         self.assertTrue(ok)
 
+    def test_copy_mode_creates_work_dir(self):
+        import shutil
+        with TemporaryDirectory() as tmp:
+            src_dir = Path(tmp) / "src"
+            src_dir.mkdir()
+            (src_dir / "model").mkdir()
+            (src_dir / "model" / "test.py").write_text("print('hello')")
+            (src_dir / ".git").mkdir()
+
+            state = _state()
+            state.topic.codebase["repo_path"] = str(src_dir)
+            context = AgentContext(
+                artifact_store=ArtifactStore(Path(tmp) / "runs"),
+                memory_store=None, tool_registry=None,
+                settings={"enable_code_writes": True, "enable_llm": False},
+            )
+            state.values["experiment_plans"] = [{"experiment_id": "exp_1", "hypothesis": "test", "modification": "change"}]
+            state.values["code_tasks"] = [{"task_id": "ct_1", "experiment_id": "exp_1", "allowed_paths": ["model/test.py"], "protected_paths": []}]
+
+            agent = CodeWriterAgent()
+            agent.run(state, context)
+
+            patch = state.values["code_patches_by_experiment_id"]["exp_1"]
+            self.assertIn("code_copies", patch["work_dir"])
+            self.assertEqual(patch["mode"], "copy")
+            self.assertTrue(Path(patch["work_dir"]).exists())
+            self.assertTrue((Path(patch["work_dir"]) / "model" / "test.py").exists())
+            self.assertFalse((Path(patch["work_dir"]) / ".git").exists(),
+                             ".git should not be copied")
+
 
 if __name__ == "__main__":
     main()
