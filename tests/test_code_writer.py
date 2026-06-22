@@ -34,6 +34,44 @@ class CodeWriterAgentTest(TestCase):
             self.assertEqual(patch["status"], "skipped")
             self.assertIn("code writes disabled", patch["reason"])
 
+    def test_rejects_absolute_path(self):
+        agent = CodeWriterAgent()
+        ok, reason = agent._validate_paths(
+            ["/etc/passwd"], Path("/tmp/work"), ["model/"], []
+        )
+        self.assertFalse(ok)
+        self.assertIn("absolute", reason.lower())
+
+    def test_rejects_parent_traversal(self):
+        agent = CodeWriterAgent()
+        ok, reason = agent._validate_paths(
+            ["../outside.py"], Path("/tmp/work"), ["model/"], []
+        )
+        self.assertFalse(ok)
+        self.assertIn("..", reason)
+
+    def test_rejects_path_outside_work_dir(self):
+        agent = CodeWriterAgent()
+        ok, reason = agent._validate_paths(
+            ["model/../../etc/hacked"], Path("/tmp/work/sub/proj"), ["model/"], []
+        )
+        self.assertFalse(ok)
+
+    def test_rejects_protected_file(self):
+        agent = CodeWriterAgent()
+        ok, reason = agent._validate_paths(
+            ["model/secrets.py"], Path("/tmp/work"), ["model/"], ["model/secrets.py"]
+        )
+        self.assertFalse(ok)
+        self.assertIn("protected", reason.lower())
+
+    def test_accepts_valid_path_in_allowed(self):
+        agent = CodeWriterAgent()
+        ok, reason = agent._validate_paths(
+            ["model/decoder.py"], Path("/tmp/work"), ["model/"], ["model/secrets.py"]
+        )
+        self.assertTrue(ok)
+
 
 if __name__ == "__main__":
     main()
