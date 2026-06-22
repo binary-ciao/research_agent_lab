@@ -52,17 +52,20 @@ ResearchManager
 → OpportunityAgent
 → ExperimentPlanner
 → DeveloperAgent
-→ AutonomousExperimentAgent
+→ ExperimentOrchestratorAgent（内部封装 CodeWriter → run → AutoDebugger 循环，P15）
 → ExperimentDecisionAgent
 → TreePrunerAgent（仅 --enable-tree-search 时启用，P10）
 → BranchSelectionAgent（仅 --enable-tree-search 时启用，P9b）
 → BranchToPlanAgent（仅 --enable-tree-search 时启用，P9c）
 → TreeSearchAgent（仅 --enable-tree-search 时启用）
 → ReviewerAgent
+→ RunEvaluationAgent
 → LiteratureMemoryPersistenceAgent
 ```
 
-默认不开启 tree search 时为 19 个 Agent；开启 `--enable-tree-search` 后为 22 个 Agent。
+默认不开启 tree search 时为 21 个 Agent；开启 `--enable-tree-search` 后为 25 个 Agent（含 Orchestrator 内部的 3 个子 Agent）。
+
+    `ExperimentOrchestratorAgent`（P15）在 workflow 中作为一个节点，内部封装完整 code→run→debug→retry 循环。CodeWriterAgent 需 `--enable-code-writes` 才会实际修改文件。AutoDebuggerAgent 需 `--enable-llm` 才会尝试自动修复。
 
 `ResultParserAgent` 目前更多作为内部解析能力，由 `AutonomousExperimentAgent` 直接调用 `parse_experiment_output()`。这不是问题，但要在文档和测试里明确：它不一定作为主 workflow 中的独立节点出现。
 
