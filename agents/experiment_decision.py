@@ -58,6 +58,15 @@ class ExperimentDecisionAgent(Agent):
 
         if first_decision is None:
             first_decision = {}
+
+        summary = state.values.get("orchestrator_summary")
+        if isinstance(summary, dict) and first_decision:
+            debug_rounds = summary.get("debug_rounds", 0)
+            if debug_rounds > 0:
+                first_decision["notes"] = first_decision.get("notes", []) + [
+                    f"orchestrator: {debug_rounds} debug round(s) used"
+                ]
+
         state.values["experiment_decision"] = first_decision
         state.values["experiment_decisions"] = all_decisions
 
