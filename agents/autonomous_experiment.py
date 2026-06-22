@@ -54,20 +54,9 @@ class AutonomousExperimentAgent(Agent):
 
         all_results: list[dict[str, Any]] = []
         for plan in plans:
-            experiment_id = plan.get("experiment_id", "unknown")
-            smoke_commands = self._smoke_commands(state)
-            for cmd in smoke_commands:
-                result = self._execute_and_parse(experiment_id, cmd, repo_path, state)
-                context.artifact_store.save_json(
-                    state.run_id, "experiment_results", result.result_id, result
-                )
-                all_results.append(asdict(result))
-                # Stop on error within the plan
-                if result.status == "error":
-                    break
-            # Stop processing further plans after an error
-            if all_results and all_results[-1].get("status") == "error":
-                break
+            if isinstance(plan, dict):
+                results = self.run_single_plan(state, context, plan)
+                all_results.extend(results)
 
         state.values["experiment_results"] = all_results
         summary = self._summarize(all_results)
@@ -76,6 +65,37 @@ class AutonomousExperimentAgent(Agent):
             artifacts={"experiment_results": [r["result_id"] for r in all_results]},
             values={"experiment_results": all_results},
         )
+
+    def run_single_plan(self, state: ResearchState, context: AgentContext, plan: dict, patch_dict: dict | None = None, attempt: int = 0) -> list[dict]:
+        experiment_id = plan.get("experiment_id", "unknown")
+        codebase = state.topic.codebase
+        repo_path = codebase.get("repo_path", "")
+
+        work_dir = repo_path
+        if patch_dict and patch_dict.get("work_dir"):
+            work_dir = patch_dict["work_dir"]
+        elif isinstance(state.values.get("code_patches_by_experiment_id"), dict):
+            by_id = state.values["code_patches_by_experiment_id"]
+            if experiment_id in by_id and by_id[experiment_id].get("work_dir"):
+                work_dir = by_id[experiment_id]["work_dir"]
+
+        if not context.settings.get("enable_experiments"):
+            return []
+
+        success_criteria = plan.get("success_criteria")
+
+        smoke_commands = self._smoke_commands(state)
+        results: list[dict] = []
+        for cmd in smoke_commands:
+            result = self._execute_and_parse(experiment_id, cmd, work_dir, state, success_criteria)
+            result.attempt = attempt
+            result.patch_id = patch_dict.get("patch_id", "") if patch_dict else ""
+            result.work_dir = work_dir
+            context.artifact_store.save_json(state.run_id, "experiment_results", result.result_id, result)
+            results.append(asdict(result))
+            if result.status == "error":
+                break
+        return results
 
     def _smoke_commands(self, state: ResearchState) -> list[str]:
         report = state.values.get("codebase_report", {})
@@ -88,11 +108,12 @@ class AutonomousExperimentAgent(Agent):
         self,
         experiment_id: str,
         command: str,
-        repo_path: str,
+        work_dir: str,
         state: ResearchState,
+        success_criteria: dict | None = None,
     ) -> ExperimentResult:
-        cwd, clean_command = _normalize_command(command, repo_path)
-        executor = ScopedCodeExecutor(repo_path)
+        cwd, clean_command = _normalize_command(command, work_dir)
+        executor = ScopedCodeExecutor(work_dir)
         cmd_parts = shlex.split(clean_command)
         start = time.monotonic()
         try:
@@ -106,6 +127,7 @@ class AutonomousExperimentAgent(Agent):
                 command=command,
                 expected_metrics=state.topic.experiment_metrics,
                 duration_seconds=duration,
+                success_criteria=success_criteria,
             )
         except Exception as exc:
             duration = round(time.monotonic() - start, 2)
