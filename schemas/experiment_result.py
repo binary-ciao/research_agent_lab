@@ -18,4 +18,10 @@ class ExperimentResult:
     duration_seconds: float = 0.0
     error_message: str = ""
     run_command: str = ""
+    attempt: int = 0
+    patch_id: str = ""
+    commands: list[str] = field(default_factory=list)
+    timed_out: bool = False
+    work_dir: str = ""
+    criteria_results: list[dict] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
