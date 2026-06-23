@@ -102,6 +102,62 @@ class CodeWriterAgentTest(TestCase):
             self.assertFalse((Path(patch["work_dir"]) / ".git").exists(),
                              ".git should not be copied")
 
+    def test_policy_blocks_protected_file(self):
+        with TemporaryDirectory() as tmp:
+            src_dir = Path(tmp) / "src"
+            src_dir.mkdir()
+            (src_dir / "model").mkdir(parents=True)
+            (src_dir / "model" / "secrets.py").write_text("SECRET = 'xyz'")
+            (src_dir / "model" / "decoder.py").write_text("x = 1")
+            state = _state()
+            state.topic.codebase["repo_path"] = str(src_dir)
+            state.topic.codebase["copy_can_modify"] = True  # sandbox mode
+            state.topic.codebase["protected_files"] = ["model/secrets.py"]
+            state.topic.codebase["allowed_auto_edit"] = ["model/"]
+            state.values["experiment_plans"] = [{
+                "experiment_id": "exp_1", "hypothesis": "test",
+                "modification": "change secrets",
+                "files_to_change": ["model/secrets.py"],
+            }]
+            context = AgentContext(
+                artifact_store=ArtifactStore(Path(tmp) / "runs"),
+                memory_store=None, tool_registry=None,
+                settings={"enable_code_writes": True},
+            )
+            agent = CodeWriterAgent()
+            result = agent.run(state, context)
+            patch = state.values["code_patches_by_experiment_id"]["exp_1"]
+            self.assertEqual(patch["status"], "blocked")
+            self.assertIn("protected", patch["reason"])
+
+    def test_policy_blocks_max_files(self):
+        with TemporaryDirectory() as tmp:
+            src_dir = Path(tmp) / "src"
+            src_dir.mkdir()
+            (src_dir / "model").mkdir(parents=True)
+            for i in range(10):
+                (src_dir / "model" / f"file_{i}.py").write_text(f"# file {i}")
+            state = _state()
+            state.topic.codebase["repo_path"] = str(src_dir)
+            state.topic.codebase["copy_can_modify"] = True
+            state.topic.codebase["max_files_per_patch"] = 3
+            state.topic.codebase["allowed_auto_edit"] = ["model/"]
+            state.values["experiment_plans"] = [{
+                "experiment_id": "exp_1", "hypothesis": "test",
+                "modification": "change many files",
+                "files_to_change": [f"model/file_{i}.py" for i in range(10)],
+            }]
+            context = AgentContext(
+                artifact_store=ArtifactStore(Path(tmp) / "runs"),
+                memory_store=None, tool_registry=None,
+                settings={"enable_code_writes": True},
+            )
+            agent = CodeWriterAgent()
+            result = agent.run(state, context)
+            patch = state.values["code_patches_by_experiment_id"]["exp_1"]
+            self.assertEqual(patch["status"], "blocked")
+            self.assertIn("files", patch["reason"].lower())
+
 
 if __name__ == "__main__":
     main()

@@ -72,6 +72,22 @@ class CodeWriterAgent(Agent):
             )
             return self._persist(patch, state, context, experiment_id)
 
+        # ProjectSafetyPolicy business-rule check
+        from tools.project_safety import ProjectSafetyPolicy
+        policy = ProjectSafetyPolicy.from_topic(state.topic)
+        problems = policy.validate_planned_paths(list(changes.keys()))
+        if problems:
+            patch = CodePatch(
+                experiment_id=experiment_id,
+                task_id=task.get("task_id", ""),
+                attempt=attempt,
+                mode=mode,
+                work_dir=str(work_dir),
+                status="blocked",
+                reason="; ".join(problems),
+            )
+            return self._persist(patch, state, context, experiment_id)
+
         changed_files, backups, ok, reason = self._apply_changes(changes, work_dir, allowed, protected)
         if not ok:
             patch = CodePatch(
