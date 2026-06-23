@@ -7,6 +7,9 @@ from typing import Any
 from core.agent_base import Agent, AgentContext, AgentResult
 from core.state import ResearchState
 from schemas.auto_debug_record import AutoDebugRecord
+from tools.llm_budget import llm_budget_allows, record_llm_usage
+from tools.llm_client import OpenAICompatibleClient, extract_json_object
+from tools.model_router import ModelRouter
 
 
 _TRACEBACK_PATTERN = re.compile(
@@ -16,6 +19,10 @@ _TRACEBACK_PATTERN = re.compile(
 
 class AutoDebuggerAgent(Agent):
     name = "auto_debugger"
+
+    def __init__(self):
+        super().__init__()
+        self.llm_client = OpenAICompatibleClient()
 
     def run(self, state: ResearchState, context: AgentContext) -> AgentResult:
         results = state.values.get("experiment_results") or []
@@ -59,12 +66,156 @@ class AutoDebuggerAgent(Agent):
             )
             return self._persist(record, state, context, experiment_id)
 
+        plans = state.values.get("experiment_plans", []) or []
+        plan = plans[0] if plans else {}
+
         work_dir = Path(code_patch.get("work_dir", ""))
         error_text = failed_result.get("error_message", "")
         log_tail = failed_result.get("log_tail", "")
         combined_log = f"{error_text}\n{log_tail}"
 
         traceback_info, ignored_paths = self._parse_traceback(combined_log, work_dir)
+        state.values["ignored_traceback_paths"] = ignored_paths
+
+        # --- LLM path ---
+
+        # Collect candidate files
+        plan_files = plan.get("files_to_change", [])
+        patch_files = [f.get("relative_path", "") for f in code_patch.get("changed_files", [])]
+        traceback_files = list(traceback_info.keys()) if traceback_info else []
+        candidates = list(dict.fromkeys(traceback_files + plan_files + patch_files))  # dedup, preserve order
+
+        contexts, read_only = self._read_file_contexts(candidates, work_dir, traceback_info or {})
+
+        # Look up route early (used by both budget and LLM call branches)
+        route = ModelRouter(state.topic).route_for("paper_triage")
+
+        # Check budget
+        allowed, budget_reason = llm_budget_allows(state, context.settings)
+        if not allowed:
+            self._write_llm_call_artifact(state, context.artifact_store, {
+                "agent": "auto_debugger",
+                "experiment_id": experiment_id,
+                "result_id": failed_result.get("result_id", ""),
+                "patch_id": patch_id,
+                "status": budget_reason,
+                "provider": route.provider,
+                "model": route.model,
+                "route_enabled": route.enabled,
+                "usage": {},
+                "error": budget_reason,
+            })
+            record = AutoDebugRecord(
+                experiment_id=experiment_id,
+                result_id=failed_result.get("result_id", ""),
+                patch_id=patch_id,
+                attempt_number=attempt,
+                error_summary=f"skipped: {budget_reason}",
+                fix_description="",
+                fix_file_contents={},
+            )
+            return self._persist(record, state, context, experiment_id)
+
+        # Check route enabled
+        if route.provider in {"offline", "local", "rule_based"}:
+            self._write_llm_call_artifact(state, context.artifact_store, {
+                "agent": "auto_debugger",
+                "experiment_id": experiment_id,
+                "result_id": failed_result.get("result_id", ""),
+                "patch_id": patch_id,
+                "status": "skipped_route_disabled",
+                "provider": route.provider,
+                "model": route.model,
+                "route_enabled": route.enabled,
+                "usage": {},
+                "error": "",
+            })
+            record = AutoDebugRecord(experiment_id=experiment_id,
+                result_id=failed_result.get("result_id", ""),
+                patch_id=patch_id, attempt_number=attempt,
+                error_summary="skipped: LLM route not enabled",
+                fix_description="",
+                fix_file_contents={},
+            )
+            return self._persist(record, state, context, experiment_id)
+
+        # No usable context (includes case of no traceback and no plan files)
+        if not contexts:
+            self._write_llm_call_artifact(state, context.artifact_store, {
+                "agent": "auto_debugger",
+                "experiment_id": experiment_id,
+                "result_id": failed_result.get("result_id", ""),
+                "patch_id": patch_id,
+                "status": "skipped_no_context",
+                "provider": route.provider,
+                "model": route.model,
+                "route_enabled": route.enabled,
+                "usage": {},
+                "error": "",
+            })
+            record = AutoDebugRecord(experiment_id=experiment_id,
+                result_id=failed_result.get("result_id", ""),
+                patch_id=patch_id, attempt_number=attempt,
+                error_summary=error_text[:500] if error_text else "no error message",
+                fix_description="no usable file context for LLM; manual review needed",
+                fix_file_contents={},
+            )
+            return self._persist(record, state, context, experiment_id)
+
+        # Build prompt and call LLM
+        prompt = self._build_debug_prompt(experiment_id, attempt, plan, failed_result, code_patch, contexts, read_only)
+        response = self.llm_client.chat(route, prompt, temperature=0.1, max_tokens=3000)
+
+        call_status = "ok" if response.ok else "error"
+        call_data: dict = {
+            "agent": "auto_debugger",
+            "experiment_id": experiment_id,
+            "result_id": failed_result.get("result_id", ""),
+            "patch_id": patch_id,
+            "status": call_status,
+            "provider": route.provider,
+            "model": route.model,
+            "route_enabled": route.enabled,
+            "usage": response.usage,
+            "error": response.error if not response.ok else "",
+        }
+        self._write_llm_call_artifact(state, context.artifact_store, call_data)
+
+        if response.ok:
+            record_llm_usage(state, response.usage)
+
+        # Parse and validate LLM response
+        fix_description = ""
+        fix_file_contents: dict[str, str] = {}
+        if response.ok:
+            payload = extract_json_object(response.text)
+            if payload is not None:
+                fix_description = str(payload.get("fix_description", ""))
+                raw_fixes = payload.get("fix_file_contents")
+                if isinstance(raw_fixes, dict):
+                    for fpath, fcontent in raw_fixes.items():
+                        if not isinstance(fpath, str) or not isinstance(fcontent, str):
+                            continue
+                        if fpath in read_only:
+                            continue  # reject overwrite of read_only_context files
+                        if fpath not in candidates:
+                            continue  # reject paths outside candidate list
+                        if Path(fpath).is_absolute() or ".." in Path(fpath).parts:
+                            continue
+                        fix_file_contents[fpath] = fcontent
+            else:
+                self._write_llm_call_artifact(state, context.artifact_store, {
+                    "agent": "auto_debugger",
+                    "experiment_id": experiment_id,
+                    "result_id": failed_result.get("result_id", ""),
+                    "patch_id": patch_id,
+                    "status": "invalid_json",
+                    "provider": route.provider,
+                    "model": route.model,
+                    "route_enabled": route.enabled,
+                    "usage": {},
+                    "error": "JSON parse failed",
+                })
 
         record = AutoDebugRecord(
             experiment_id=experiment_id,
@@ -72,10 +223,12 @@ class AutoDebuggerAgent(Agent):
             patch_id=patch_id,
             attempt_number=attempt,
             error_summary=error_text[:500] if error_text else "no error message",
-            fix_description=f"traceback parsed: {traceback_info}" if traceback_info else "no traceback found; manual review needed",
-            fix_file_contents={},
+            fix_description=fix_description or (
+                f"traceback parsed: {traceback_info}" if traceback_info
+                else "no traceback found; manual review needed"
+            ),
+            fix_file_contents=fix_file_contents,
         )
-        state.values["ignored_traceback_paths"] = ignored_paths
         return self._persist(record, state, context, experiment_id)
 
     def _parse_traceback(self, text: str, work_dir: Path) -> tuple[dict[str, int] | None, list[str]]:

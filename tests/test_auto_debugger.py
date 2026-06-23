@@ -156,5 +156,120 @@ class AutoDebuggerAgentTest(TestCase):
             self.assertTrue(len(paths) >= 1)
 
 
+    def test_budget_exhausted_records_llm_call(self):
+        from pathlib import Path
+        with TemporaryDirectory() as tmp:
+            state, context = self._state_and_context(
+                tmp, enable_llm=True, max_debug_attempts=2,
+                llm_call_budget=5, llm_token_budget=10000,
+            )
+            state.values["llm_calls_used"] = 5  # budget exhausted
+            agent = AutoDebuggerAgent()
+            result = agent.run(state, context)
+            paths = context.artifact_store.list_artifacts(state.run_id, "llm_calls")
+            self.assertTrue(len(paths) >= 1)
+            record = state.values.get("last_debug_record", {})
+            self.assertEqual(record.get("fix_file_contents", {}), {})
+
+    def test_route_disabled_records_llm_call(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        from tools.model_router import ModelRoute
+        with TemporaryDirectory() as tmp:
+            state, context = self._state_and_context(
+                tmp, enable_llm=True, max_debug_attempts=2,
+                llm_call_budget=10, llm_token_budget=50000,
+            )
+            # Route disabled: provider is offline
+            disabled_route = ModelRoute(
+                agent="paper_triage", provider="offline",
+                model="rule_based", enabled=True,
+            )
+            with patch("agents.auto_debugger.ModelRouter") as mock_router:
+                mock_router.return_value.route_for.return_value = disabled_route
+                agent = AutoDebuggerAgent()
+                result = agent.run(state, context)
+            paths = context.artifact_store.list_artifacts(state.run_id, "llm_calls")
+            self.assertTrue(len(paths) >= 1)
+
+    def test_valid_json_sets_fix_file_contents(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        from tools.llm_client import LLMResponse
+        from tools.model_router import ModelRoute
+        with TemporaryDirectory() as tmp:
+            work = Path(tmp) / "code"
+            work.mkdir()
+            (work / "model.py").write_text("class Model:\n    x = missing_var\n")
+            state, context = self._state_and_context(
+                tmp, enable_llm=True, max_debug_attempts=2,
+                llm_call_budget=10, llm_token_budget=50000,
+            )
+            state.values["code_patches_by_experiment_id"]["exp_1"]["work_dir"] = str(work)
+            state.values["code_patches_by_experiment_id"]["exp_1"]["changed_files"] = [
+                {"relative_path": "model.py"}
+            ]
+            state.values["experiment_plans"] = [{
+                "experiment_id": "exp_1",
+                "hypothesis": "test", "modification": "test",
+                "files_to_change": ["model.py"],
+            }]
+            mock_response = LLMResponse(
+                ok=True, text='{"fix_description":"add missing import","fix_file_contents":{"model.py":"class Model:\\n    x = 1\\n"}}',
+                provider="deepseek", model="deepseek-v4-flash",
+            )
+            with patch("agents.auto_debugger.ModelRouter") as mock_router:
+                mock_router.return_value.route_for.return_value = ModelRoute(
+                    agent="paper_triage", provider="deepseek",
+                    model="deepseek-v4-flash", api_key_env="DEEPSEEK_API_KEY",
+                    enabled=True,
+                )
+                with patch.object(agent := AutoDebuggerAgent(), "llm_client") as mock_client:
+                    mock_client.chat.return_value = mock_response
+                    result = agent.run(state, context)
+            record = state.values.get("last_debug_record", {})
+            self.assertIsNotNone(record.get("fix_file_contents"))
+            self.assertIn("model.py", record.get("fix_file_contents", {}))
+            self.assertIn("class Model:", record["fix_file_contents"]["model.py"])
+
+    def test_invalid_json_records_llm_call(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        from tools.llm_client import LLMResponse
+        with TemporaryDirectory() as tmp:
+            work = Path(tmp) / "code"
+            work.mkdir()
+            (work / "model.py").write_text("class Model:\n    x = 1\n")
+            state, context = self._state_and_context(
+                tmp, enable_llm=True, max_debug_attempts=2,
+                llm_call_budget=10, llm_token_budget=50000,
+            )
+            state.values["code_patches_by_experiment_id"]["exp_1"]["work_dir"] = str(work)
+            state.values["code_patches_by_experiment_id"]["exp_1"]["changed_files"] = [
+                {"relative_path": "model.py"}
+            ]
+            state.values["experiment_plans"] = [{
+                "experiment_id": "exp_1",
+                "hypothesis": "test", "modification": "test",
+                "files_to_change": ["model.py"],
+            }]
+            mock_response = LLMResponse(
+                ok=True, text="not valid json {{{",
+                provider="deepseek", model="deepseek-v4-flash",
+            )
+            with patch("agents.auto_debugger.ModelRouter") as mock_router:
+                mock_router.return_value.route_for.return_value = type("obj", (), {
+                    "provider": "deepseek", "model": "deepseek-v4-flash",
+                    "enabled": True, "api_key_env": "DEEPSEEK_API_KEY",
+                })()
+                with patch.object(agent := AutoDebuggerAgent(), "llm_client") as mock_client:
+                    mock_client.chat.return_value = mock_response
+                    result = agent.run(state, context)
+            paths = context.artifact_store.list_artifacts(state.run_id, "llm_calls")
+            self.assertTrue(len(paths) >= 1)
+            record = state.values.get("last_debug_record", {})
+            self.assertEqual(record.get("fix_file_contents", {}), {})
+
+
 if __name__ == "__main__":
     main()
