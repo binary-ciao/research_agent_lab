@@ -278,6 +278,177 @@ class AutoDebuggerAgentTest(TestCase):
             record = state.values.get("last_debug_record", {})
             self.assertEqual(record.get("fix_file_contents", {}), {})
 
+    def test_fix_file_contents_filters_non_candidate_keys(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        from tools.llm_client import LLMResponse
+        from tools.model_router import ModelRoute
+        with TemporaryDirectory() as tmp:
+            work = Path(tmp) / "code"
+            work.mkdir()
+            (work / "model.py").write_text("class Model:\n    x = 1\n")
+            state, context = self._state_and_context(
+                tmp, enable_llm=True, max_debug_attempts=2,
+                llm_call_budget=10, llm_token_budget=50000,
+            )
+            state.values["code_patches_by_experiment_id"]["exp_1"]["work_dir"] = str(work)
+            state.values["code_patches_by_experiment_id"]["exp_1"]["changed_files"] = [
+                {"relative_path": "model.py"}
+            ]
+            state.values["experiment_plans"] = [{
+                "experiment_id": "exp_1",
+                "hypothesis": "test", "modification": "test",
+                "files_to_change": ["model.py"],
+            }]
+            # LLM returns "other_file.py" which is NOT in candidates
+            mock_response = LLMResponse(
+                ok=True,
+                text='{"fix_description":"fix","fix_file_contents":{"model.py":"class Model:\\n    x = 2\\n","other_file.py":"print(1)\\n"}}',
+                provider="deepseek", model="deepseek-v4-flash",
+            )
+            with patch("agents.auto_debugger.ModelRouter") as mock_router:
+                mock_router.return_value.route_for.return_value = ModelRoute(
+                    agent="paper_triage", provider="deepseek",
+                    model="deepseek-v4-flash", api_key_env="DEEPSEEK_API_KEY",
+                    enabled=True,
+                )
+                with patch.object(agent := AutoDebuggerAgent(), "llm_client") as mock_client:
+                    mock_client.chat.return_value = mock_response
+                    result = agent.run(state, context)
+            record = state.values.get("last_debug_record", {})
+            fix_contents = record.get("fix_file_contents", {})
+            self.assertIn("model.py", fix_contents)
+            self.assertNotIn("other_file.py", fix_contents)
+
+    def test_fix_file_contents_rejects_absolute_key(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        from tools.llm_client import LLMResponse
+        from tools.model_router import ModelRoute
+        with TemporaryDirectory() as tmp:
+            work = Path(tmp) / "code"
+            work.mkdir()
+            (work / "model.py").write_text("class Model:\n    x = 1\n")
+            state, context = self._state_and_context(
+                tmp, enable_llm=True, max_debug_attempts=2,
+                llm_call_budget=10, llm_token_budget=50000,
+            )
+            state.values["code_patches_by_experiment_id"]["exp_1"]["work_dir"] = str(work)
+            state.values["code_patches_by_experiment_id"]["exp_1"]["changed_files"] = [
+                {"relative_path": "model.py"}
+            ]
+            state.values["experiment_plans"] = [{
+                "experiment_id": "exp_1",
+                "hypothesis": "test", "modification": "test",
+                "files_to_change": ["model.py"],
+            }]
+            abs_path = str(work / "model.py")  # an absolute path
+            # LLM returns an absolute path as a key
+            mock_response = LLMResponse(
+                ok=True,
+                text='{"fix_description":"fix","fix_file_contents":{"' + abs_path.replace('\\', '\\\\') + '":"class Model:\\n    x = 2\\n"}}',
+                provider="deepseek", model="deepseek-v4-flash",
+            )
+            with patch("agents.auto_debugger.ModelRouter") as mock_router:
+                mock_router.return_value.route_for.return_value = ModelRoute(
+                    agent="paper_triage", provider="deepseek",
+                    model="deepseek-v4-flash", api_key_env="DEEPSEEK_API_KEY",
+                    enabled=True,
+                )
+                with patch.object(agent := AutoDebuggerAgent(), "llm_client") as mock_client:
+                    mock_client.chat.return_value = mock_response
+                    result = agent.run(state, context)
+            record = state.values.get("last_debug_record", {})
+            fix_contents = record.get("fix_file_contents", {})
+            self.assertNotIn(abs_path, fix_contents)
+
+    def test_fix_file_contents_rejects_parent_traversal_key(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        from tools.llm_client import LLMResponse
+        from tools.model_router import ModelRoute
+        with TemporaryDirectory() as tmp:
+            work = Path(tmp) / "code"
+            work.mkdir()
+            (work / "model.py").write_text("class Model:\n    x = 1\n")
+            state, context = self._state_and_context(
+                tmp, enable_llm=True, max_debug_attempts=2,
+                llm_call_budget=10, llm_token_budget=50000,
+            )
+            state.values["code_patches_by_experiment_id"]["exp_1"]["work_dir"] = str(work)
+            state.values["code_patches_by_experiment_id"]["exp_1"]["changed_files"] = [
+                {"relative_path": "model.py"}
+            ]
+            state.values["experiment_plans"] = [{
+                "experiment_id": "exp_1",
+                "hypothesis": "test", "modification": "test",
+                "files_to_change": ["model.py"],
+            }]
+            # LLM returns "../secret.txt" as a key
+            mock_response = LLMResponse(
+                ok=True,
+                text='{"fix_description":"fix","fix_file_contents":{"../secret.txt":"password=12345\\n"}}',
+                provider="deepseek", model="deepseek-v4-flash",
+            )
+            with patch("agents.auto_debugger.ModelRouter") as mock_router:
+                mock_router.return_value.route_for.return_value = ModelRoute(
+                    agent="paper_triage", provider="deepseek",
+                    model="deepseek-v4-flash", api_key_env="DEEPSEEK_API_KEY",
+                    enabled=True,
+                )
+                with patch.object(agent := AutoDebuggerAgent(), "llm_client") as mock_client:
+                    mock_client.chat.return_value = mock_response
+                    result = agent.run(state, context)
+            record = state.values.get("last_debug_record", {})
+            fix_contents = record.get("fix_file_contents", {})
+            self.assertNotIn("../secret.txt", fix_contents)
+
+    def test_fix_file_contents_rejects_read_only_key(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        from tools.llm_client import LLMResponse
+        from tools.model_router import ModelRoute
+        with TemporaryDirectory() as tmp:
+            work = Path(tmp) / "code"
+            work.mkdir()
+            (work / "model.py").write_text("class Model:\n    x = 1\n")
+            # Create a large file (> 800 lines) that will be read_only
+            (work / "large.py").write_text("line\n" * 900)
+            state, context = self._state_and_context(
+                tmp, enable_llm=True, max_debug_attempts=2,
+                llm_call_budget=10, llm_token_budget=50000,
+            )
+            state.values["code_patches_by_experiment_id"]["exp_1"]["work_dir"] = str(work)
+            state.values["code_patches_by_experiment_id"]["exp_1"]["changed_files"] = [
+                {"relative_path": "model.py"}
+            ]
+            state.values["experiment_plans"] = [{
+                "experiment_id": "exp_1",
+                "hypothesis": "test", "modification": "test",
+                "files_to_change": ["model.py", "large.py"],
+            }]
+            # LLM returns both files in fix_file_contents
+            mock_response = LLMResponse(
+                ok=True,
+                text='{"fix_description":"fix","fix_file_contents":{"model.py":"class Model:\\n    x = 2\\n","large.py":"fixed\\n"}}',
+                provider="deepseek", model="deepseek-v4-flash",
+            )
+            with patch("agents.auto_debugger.ModelRouter") as mock_router:
+                mock_router.return_value.route_for.return_value = ModelRoute(
+                    agent="paper_triage", provider="deepseek",
+                    model="deepseek-v4-flash", api_key_env="DEEPSEEK_API_KEY",
+                    enabled=True,
+                )
+                with patch.object(agent := AutoDebuggerAgent(), "llm_client") as mock_client:
+                    mock_client.chat.return_value = mock_response
+                    result = agent.run(state, context)
+            record = state.values.get("last_debug_record", {})
+            fix_contents = record.get("fix_file_contents", {})
+            # model.py is small → should be kept
+            self.assertIn("model.py", fix_contents)
+            # large.py is > 800 lines → read_only → should be filtered
+            self.assertNotIn("large.py", fix_contents)
+
 
 if __name__ == "__main__":
     main()

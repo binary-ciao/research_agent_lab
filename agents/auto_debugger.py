@@ -257,7 +257,23 @@ class AutoDebuggerAgent(Agent):
         """
         contexts: dict[str, str] = {}
         read_only: set[str] = set()
+        work_resolved = work_dir.resolve()
         for rel_path in candidates:
+            # Path safety validation — mirrors CodeWriter._validate_paths() inline:
+            # Reject empty/whitespace paths, absolute/drive-letter paths,
+            # parent traversal (..), and paths resolving outside work_dir.
+            if not rel_path or rel_path != rel_path.strip():
+                continue
+            if Path(rel_path).is_absolute() or rel_path.startswith("/") or (len(rel_path) >= 3 and rel_path[1] == ":"):
+                continue
+            if ".." in Path(rel_path).parts:
+                continue
+            try:
+                resolved = (work_dir / rel_path).resolve()
+                resolved.relative_to(work_resolved)
+            except ValueError:
+                continue
+
             target = work_dir / rel_path
             if not target.exists() or not target.is_file():
                 continue
