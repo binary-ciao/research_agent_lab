@@ -128,14 +128,21 @@ class AutoDebuggerAgent(Agent):
         self, experiment_id: str, attempt: int,
         plan: dict, failed: dict, patch: dict,
         contexts: dict[str, str],
+        read_only: set[str],
     ) -> list[dict[str, str]]:
         topic_keywords = ", ".join(
             plan.get("files_to_change", [])[:10]
         )
-        context_text = "\n\n".join(
-            f"--- {path} ---\n{content}"
-            for path, content in contexts.items()
-        )
+        context_parts = []
+        for path, content in contexts.items():
+            if path in read_only:
+                context_parts.append(f"--- [READ_ONLY] {path} ---\n{content}")
+            else:
+                context_parts.append(f"--- {path} ---\n{content}")
+        context_text = "\n\n".join(context_parts)
+        patch_id = patch.get("patch_id", "")
+        changed_files = patch.get("changed_files", [])
+        changed_summary = ", ".join(f.get("relative_path", "") for f in changed_files)
         return [
             {"role": "system", "content": (
                 "You are debugging a failed experiment. Your job is to analyze the error "
@@ -152,7 +159,9 @@ class AutoDebuggerAgent(Agent):
                 f"Hypothesis: {plan.get('hypothesis', 'unknown')}\n"
                 f"Modification: {plan.get('modification', 'unknown')}\n"
                 f"Files to change: {', '.join(plan.get('files_to_change', []))}\n"
-                f"Keywords: {topic_keywords}\n\n"
+                f"Keywords: {topic_keywords}\n"
+                f"Patch: {patch_id}\n"
+                f"Changed files: {changed_summary}\n\n"
                 f"Error: {failed.get('error_message', '')}\n"
                 f"Status: {failed.get('status', '')}\n"
                 f"Command: {failed.get('run_command', '')}\n"

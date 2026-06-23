@@ -122,12 +122,15 @@ class AutoDebuggerAgentTest(TestCase):
                   "log_tail": "Traceback...", "run_command": "python train.py"}
         patch = {"patch_id": "p1", "changed_files": [{"relative_path": "model.py"}]}
         contexts = {"model.py": "class Model:\n    x = 1\n"}
-        messages = agent._build_debug_prompt("exp_1", 0, plan, failed, patch, contexts)
+        read_only = set()
+        messages = agent._build_debug_prompt("exp_1", 0, plan, failed, patch, contexts, read_only)
         user_content = messages[1]["content"]
         self.assertIn("test hypothesis", user_content)
         self.assertIn("change x to y", user_content)
         self.assertIn("NameError", user_content)
         self.assertIn("class Model:", user_content)
+        self.assertIn("Patch: p1", user_content)
+        self.assertIn("Changed files: model.py", user_content)
 
     def test_llm_call_artifact_written(self):
         from pathlib import Path
