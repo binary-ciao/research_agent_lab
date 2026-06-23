@@ -158,6 +158,70 @@ class CodeWriterAgentTest(TestCase):
             self.assertEqual(patch["status"], "blocked")
             self.assertIn("files", patch["reason"].lower())
 
+    def test_code_task_match_by_experiment_id(self):
+        with TemporaryDirectory() as tmp:
+            src_dir = Path(tmp) / "src"
+            src_dir.mkdir()
+            (src_dir / "model").mkdir(parents=True)
+            (src_dir / "model" / "decoder.py").write_text("x = 1")
+            state = _state()
+            state.topic.codebase["repo_path"] = str(src_dir)
+            state.topic.codebase["copy_can_modify"] = True
+            state.topic.codebase["allowed_auto_edit"] = ["model/"]
+            # Two code_tasks, different experiment_ids
+            state.values["code_tasks"] = [
+                {"task_id": "ct_a", "experiment_id": "exp_other",
+                 "allowed_paths": ["other/"], "protected_paths": []},
+                {"task_id": "ct_b", "experiment_id": "exp_1",
+                 "allowed_paths": ["model/"], "protected_paths": ["model/secrets.py"]},
+            ]
+            state.values["experiment_plans"] = [{
+                "experiment_id": "exp_1", "hypothesis": "test",
+                "modification": "change decoder",
+                "files_to_change": ["model/decoder.py"],
+            }]
+            context = AgentContext(
+                artifact_store=ArtifactStore(Path(tmp) / "runs"),
+                memory_store=None, tool_registry=None,
+                settings={"enable_code_writes": True},
+            )
+            agent = CodeWriterAgent()
+            result = agent.run(state, context)
+            patch = state.values["code_patches_by_experiment_id"]["exp_1"]
+            # Should match ct_b, not ct_a
+            self.assertEqual(patch["task_id"], "ct_b")
+
+    def test_code_task_missing_blocks(self):
+        with TemporaryDirectory() as tmp:
+            src_dir = Path(tmp) / "src"
+            src_dir.mkdir()
+            (src_dir / "model").mkdir(parents=True)
+            (src_dir / "model" / "decoder.py").write_text("x = 1")
+            state = _state()
+            state.topic.codebase["repo_path"] = str(src_dir)
+            state.topic.codebase["copy_can_modify"] = True
+            state.topic.codebase["allowed_auto_edit"] = ["model/"]
+            # No matching code_task for exp_1
+            state.values["code_tasks"] = [
+                {"task_id": "ct_other", "experiment_id": "exp_other",
+                 "allowed_paths": ["other/"], "protected_paths": []},
+            ]
+            state.values["experiment_plans"] = [{
+                "experiment_id": "exp_1", "hypothesis": "test",
+                "modification": "change decoder",
+                "files_to_change": ["model/decoder.py"],
+            }]
+            context = AgentContext(
+                artifact_store=ArtifactStore(Path(tmp) / "runs"),
+                memory_store=None, tool_registry=None,
+                settings={"enable_code_writes": True},
+            )
+            agent = CodeWriterAgent()
+            result = agent.run(state, context)
+            patch = state.values["code_patches_by_experiment_id"]["exp_1"]
+            self.assertEqual(patch["status"], "blocked")
+            self.assertIn("no CodeTask", patch["reason"])
+
 
 if __name__ == "__main__":
     main()

@@ -46,7 +46,23 @@ class CodeWriterAgent(Agent):
         work_dir, mode = self._setup_work_dir(repo_path, run_dir, experiment_id, attempt, codebase)
 
         code_tasks = state.values.get("code_tasks", []) or []
-        task = code_tasks[0] if code_tasks else {}
+        task = next(
+            (
+                t for t in code_tasks
+                if isinstance(t, dict) and t.get("experiment_id") == experiment_id
+            ),
+            None,
+        )
+        if task is None:
+            patch = CodePatch(
+                experiment_id=experiment_id,
+                attempt=attempt,
+                mode=mode,
+                work_dir=str(work_dir),
+                status="blocked",
+                reason=f"no CodeTask matched experiment_id={experiment_id}",
+            )
+            return self._persist(patch, state, context, experiment_id)
         allowed = task.get("allowed_paths", []) or []
         protected = task.get("protected_paths", []) or []
 
