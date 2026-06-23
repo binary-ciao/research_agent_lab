@@ -113,5 +113,45 @@ class AutoDebuggerAgentTest(TestCase):
             self.assertTrue(any("system" in p for p in ignored))
 
 
+    def test_build_debug_prompt_includes_all_sections(self):
+        agent = AutoDebuggerAgent()
+        plan = {"experiment_id": "exp_1", "hypothesis": "test hypothesis",
+                "modification": "change x to y", "files_to_change": ["model.py"]}
+        failed = {"result_id": "r1", "status": "error",
+                  "error_message": "NameError: x not defined",
+                  "log_tail": "Traceback...", "run_command": "python train.py"}
+        patch = {"patch_id": "p1", "changed_files": [{"relative_path": "model.py"}]}
+        contexts = {"model.py": "class Model:\n    x = 1\n"}
+        messages = agent._build_debug_prompt("exp_1", 0, plan, failed, patch, contexts)
+        user_content = messages[1]["content"]
+        self.assertIn("test hypothesis", user_content)
+        self.assertIn("change x to y", user_content)
+        self.assertIn("NameError", user_content)
+        self.assertIn("class Model:", user_content)
+
+    def test_llm_call_artifact_written(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        with TemporaryDirectory() as tmp:
+            store = ArtifactStore(Path(tmp))
+            state, _ = self._state_and_context(tmp, enable_llm=True)
+            agent = AutoDebuggerAgent()
+            call_data = {
+                "agent": "auto_debugger",
+                "experiment_id": "exp_1",
+                "result_id": "r1",
+                "patch_id": "p1",
+                "status": "skipped_call_budget",
+                "provider": "deepseek",
+                "model": "deepseek-v4-flash",
+                "route_enabled": True,
+                "usage": {},
+                "error": "",
+            }
+            agent._write_llm_call_artifact(state, store, call_data)
+            paths = store.list_artifacts(state.run_id, "llm_calls")
+            self.assertTrue(len(paths) >= 1)
+
+
 if __name__ == "__main__":
     main()

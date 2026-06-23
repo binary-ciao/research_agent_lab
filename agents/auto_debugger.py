@@ -124,6 +124,51 @@ class AutoDebuggerAgent(Agent):
                 )
         return contexts, read_only
 
+    def _build_debug_prompt(
+        self, experiment_id: str, attempt: int,
+        plan: dict, failed: dict, patch: dict,
+        contexts: dict[str, str],
+    ) -> list[dict[str, str]]:
+        topic_keywords = ", ".join(
+            plan.get("files_to_change", [])[:10]
+        )
+        context_text = "\n\n".join(
+            f"--- {path} ---\n{content}"
+            for path, content in contexts.items()
+        )
+        return [
+            {"role": "system", "content": (
+                "You are debugging a failed experiment. Your job is to analyze the error "
+                "and propose a minimal, safe fix that preserves the experiment's intent. "
+                "Return exactly one JSON object with 'fix_description' (string) and "
+                "'fix_file_contents' (dict mapping relative path to complete corrected file content). "
+                "Only return files among the provided file contexts. "
+                "If a file is marked as read_only_context in the prompt, do NOT include it "
+                "in fix_file_contents — set its value to null instead. "
+                "Keep fixes minimal: change only what's needed to resolve the error."
+            )},
+            {"role": "user", "content": (
+                f"Experiment: {experiment_id} (attempt {attempt})\n"
+                f"Hypothesis: {plan.get('hypothesis', 'unknown')}\n"
+                f"Modification: {plan.get('modification', 'unknown')}\n"
+                f"Files to change: {', '.join(plan.get('files_to_change', []))}\n"
+                f"Keywords: {topic_keywords}\n\n"
+                f"Error: {failed.get('error_message', '')}\n"
+                f"Status: {failed.get('status', '')}\n"
+                f"Command: {failed.get('run_command', '')}\n"
+                f"Log tail:\n{failed.get('log_tail', '')}\n\n"
+                f"File contexts:\n{context_text}"
+            )},
+        ]
+
+    def _new_llm_call_id(self) -> str:
+        import uuid
+        return f"llm_call_{uuid.uuid4().hex[:12]}"
+
+    def _write_llm_call_artifact(self, state, artifact_store, call_data: dict):
+        call_id = self._new_llm_call_id()
+        artifact_store.save_json(state.run_id, "llm_calls", call_id, call_data)
+
     def _persist(self, record: AutoDebugRecord, state: ResearchState, context: AgentContext, experiment_id: str) -> AgentResult:
         record_dict = asdict(record)
         records = state.values.setdefault("last_debug_records_by_experiment_id", {})
