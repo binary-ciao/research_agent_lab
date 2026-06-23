@@ -158,14 +158,22 @@ class AutoDebuggerAgentTest(TestCase):
 
     def test_budget_exhausted_records_llm_call(self):
         from pathlib import Path
+        from unittest.mock import patch
+        from tools.model_router import ModelRoute
         with TemporaryDirectory() as tmp:
             state, context = self._state_and_context(
                 tmp, enable_llm=True, max_debug_attempts=2,
                 llm_call_budget=5, llm_token_budget=10000,
             )
             state.values["llm_calls_used"] = 5  # budget exhausted
-            agent = AutoDebuggerAgent()
-            result = agent.run(state, context)
+            route = ModelRoute(
+                agent="paper_triage", provider="deepseek",
+                model="deepseek-v4-flash", enabled=True,
+            )
+            with patch("agents.auto_debugger.ModelRouter") as mock_router:
+                mock_router.return_value.route_for.return_value = route
+                agent = AutoDebuggerAgent()
+                result = agent.run(state, context)
             paths = context.artifact_store.list_artifacts(state.run_id, "llm_calls")
             self.assertTrue(len(paths) >= 1)
             record = state.values.get("last_debug_record", {})
