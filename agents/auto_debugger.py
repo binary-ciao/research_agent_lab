@@ -116,8 +116,8 @@ class AutoDebuggerAgent(Agent):
             )
             return self._persist(record, state, context, experiment_id)
 
-        # Check route enabled
-        if route.provider in {"offline", "local", "rule_based"}:
+        # Check route enabled (provider=offline/local/rule_based OR API key missing)
+        if route.provider in {"offline", "local", "rule_based"} or not route.enabled:
             self._write_llm_call_artifact(state, context.artifact_store, {
                 "agent": "auto_debugger",
                 "experiment_id": experiment_id,

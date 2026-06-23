@@ -200,6 +200,32 @@ class AutoDebuggerAgentTest(TestCase):
             paths = context.artifact_store.list_artifacts(state.run_id, "llm_calls")
             self.assertTrue(len(paths) >= 1)
 
+    def test_route_enabled_false_skips_llm_call(self):
+        """route.enabled=False + provider=deepseek → skipped_route_disabled, no LLM call."""
+        from pathlib import Path
+        from unittest.mock import patch
+        from tools.model_router import ModelRoute
+        with TemporaryDirectory() as tmp:
+            state, context = self._state_and_context(
+                tmp, enable_llm=True, max_debug_attempts=2,
+                llm_call_budget=10, llm_token_budget=50000,
+            )
+            # Route configured for deepseek but API key missing → enabled=False
+            disabled_route = ModelRoute(
+                agent="paper_triage", provider="deepseek",
+                model="deepseek-v4-flash", api_key_env="MISSING_KEY",
+                enabled=False,
+            )
+            with patch("agents.auto_debugger.ModelRouter") as mock_router:
+                mock_router.return_value.route_for.return_value = disabled_route
+                agent = AutoDebuggerAgent()
+                result = agent.run(state, context)
+            paths = context.artifact_store.list_artifacts(state.run_id, "llm_calls")
+            self.assertTrue(len(paths) >= 1)
+            record = state.values.get("last_debug_record", {})
+            self.assertEqual(record.get("fix_file_contents", {}), {})
+            self.assertIn("route", record.get("error_summary", "").lower())
+
     def test_valid_json_sets_fix_file_contents(self):
         from pathlib import Path
         from unittest.mock import patch
