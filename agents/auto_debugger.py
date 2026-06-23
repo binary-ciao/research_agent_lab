@@ -94,6 +94,36 @@ class AutoDebuggerAgent(Agent):
                 ignored.append(filepath)
         return (result if result else None, ignored)
 
+    _MAX_FULL_FILE_LINES = 800
+    _TRUNCATION_CONTEXT_LINES = 100
+
+    def _read_file_contexts(self, candidates: list[str], work_dir: Path, traceback_lines: dict[str, int] | None = None) -> tuple[dict[str, str], set[str]]:
+        """Read candidate files. Returns (contexts, read_only_paths).
+        Files > _MAX_FULL_FILE_LINES lines are truncated around error lines
+        and marked as read_only_context.
+        """
+        contexts: dict[str, str] = {}
+        read_only: set[str] = set()
+        for rel_path in candidates:
+            target = work_dir / rel_path
+            if not target.exists() or not target.is_file():
+                continue
+            lines = target.read_text(encoding="utf-8").splitlines()
+            if len(lines) <= self._MAX_FULL_FILE_LINES:
+                contexts[rel_path] = "\n".join(lines)
+            else:
+                read_only.add(rel_path)
+                err_line = (traceback_lines or {}).get(rel_path, 1)
+                start = max(0, err_line - self._TRUNCATION_CONTEXT_LINES - 1)
+                end = min(len(lines), err_line + self._TRUNCATION_CONTEXT_LINES)
+                snippet = lines[start:end]
+                contexts[rel_path] = (
+                    f"[... {start} lines truncated ...]\n"
+                    + "\n".join(snippet)
+                    + f"\n[... {len(lines) - end} lines truncated ...]"
+                )
+        return contexts, read_only
+
     def _persist(self, record: AutoDebugRecord, state: ResearchState, context: AgentContext, experiment_id: str) -> AgentResult:
         record_dict = asdict(record)
         records = state.values.setdefault("last_debug_records_by_experiment_id", {})

@@ -56,6 +56,39 @@ class AutoDebuggerAgentTest(TestCase):
             self.assertIn("error", result.notes[0].lower() if result.notes else "")
 
 
+    def test_large_file_is_read_only_context(self):
+        from pathlib import Path
+        with TemporaryDirectory() as tmp:
+            work = Path(tmp) / "code"
+            work.mkdir()
+            small = work / "small.py"
+            small.write_text("line\n" * 100)
+            large = work / "large.py"
+            large.write_text("line\n" * 900)
+            agent = AutoDebuggerAgent()
+            candidates = ["small.py", "large.py"]
+            contexts, read_only = agent._read_file_contexts(candidates, work)
+            self.assertIn("small.py", contexts)
+            self.assertGreater(len(contexts["small.py"]), 0)
+            self.assertIn("large.py", read_only)
+            # large.py content should be truncated, not full
+            self.assertLess(len(contexts.get("large.py", "").splitlines()), 900)
+
+    def test_reads_traceback_and_plan_contexts(self):
+        from pathlib import Path
+        with TemporaryDirectory() as tmp:
+            work = Path(tmp) / "code"
+            work.mkdir()
+            (work / "train.py").write_text("def train():\n    pass\n")
+            (work / "model.py").write_text("class Model:\n    pass\n")
+            agent = AutoDebuggerAgent()
+            candidates = ["train.py", "model.py"]
+            traceback_lines = {"train.py": 2}
+            contexts, read_only = agent._read_file_contexts(candidates, work, traceback_lines)
+            self.assertIn("train.py", contexts)
+            self.assertIn("model.py", contexts)
+            self.assertEqual(len(read_only), 0)
+
     def test_discards_traceback_outside_work_dir(self):
         with TemporaryDirectory() as tmp:
             work = Path(tmp) / "code"
