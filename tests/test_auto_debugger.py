@@ -56,5 +56,29 @@ class AutoDebuggerAgentTest(TestCase):
             self.assertIn("error", result.notes[0].lower() if result.notes else "")
 
 
+    def test_discards_traceback_outside_work_dir(self):
+        with TemporaryDirectory() as tmp:
+            work = Path(tmp) / "code"
+            work.mkdir()
+            (work / "train.py").write_text("x = 1")
+            state, context = self._state_and_context(
+                tmp, enable_llm=True, max_debug_attempts=2,
+            )
+            agent = AutoDebuggerAgent()
+            train_py = work / "train.py"
+            text = (
+                'File "/etc/system.py", line 42, in run\n'
+                f'File "{train_py}", line 10, in forward\n'
+            )
+            resolved, ignored = agent._parse_traceback(text, work)
+            self.assertIsNotNone(resolved)
+            self.assertIn("train.py", resolved)
+            self.assertEqual(resolved["train.py"], 10)
+            self.assertNotIn("/etc/system.py", resolved)
+            self.assertNotIn("system.py", resolved)
+            self.assertTrue(len(ignored) >= 1)
+            self.assertTrue(any("system" in p for p in ignored))
+
+
 if __name__ == "__main__":
     main()

@@ -64,7 +64,7 @@ class AutoDebuggerAgent(Agent):
         log_tail = failed_result.get("log_tail", "")
         combined_log = f"{error_text}\n{log_tail}"
 
-        traceback_info = self._parse_traceback(combined_log, work_dir)
+        traceback_info, ignored_paths = self._parse_traceback(combined_log, work_dir)
 
         record = AutoDebugRecord(
             experiment_id=experiment_id,
@@ -75,20 +75,24 @@ class AutoDebuggerAgent(Agent):
             fix_description=f"traceback parsed: {traceback_info}" if traceback_info else "no traceback found; manual review needed",
             fix_file_contents={},
         )
+        state.values["ignored_traceback_paths"] = ignored_paths
         return self._persist(record, state, context, experiment_id)
 
-    def _parse_traceback(self, text: str, work_dir: Path) -> dict[str, int] | None:
+    def _parse_traceback(self, text: str, work_dir: Path) -> tuple[dict[str, int] | None, list[str]]:
         matches = _TRACEBACK_PATTERN.findall(text)
         if not matches:
-            return None
+            return None, []
         result: dict[str, int] = {}
+        ignored: list[str] = []
+        work_resolved = work_dir.resolve()
         for filepath, line_num in matches:
             try:
-                rel = str(Path(filepath).resolve().relative_to(work_dir.resolve()))
+                resolved = Path(filepath).resolve()
+                rel = str(resolved.relative_to(work_resolved))
+                result[rel] = int(line_num)
             except ValueError:
-                rel = filepath
-            result[rel] = int(line_num)
-        return result if result else None
+                ignored.append(filepath)
+        return (result if result else None, ignored)
 
     def _persist(self, record: AutoDebugRecord, state: ResearchState, context: AgentContext, experiment_id: str) -> AgentResult:
         record_dict = asdict(record)
