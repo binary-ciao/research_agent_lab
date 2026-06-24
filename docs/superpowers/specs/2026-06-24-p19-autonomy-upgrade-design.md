@@ -228,12 +228,12 @@ def run(self, state: ResearchState, context: AgentContext) -> AgentResult:
 
 #### Integration
 
-File: `workflows/factory.py` — insert after `PaperTriageAgent()`:
+File: `workflows/factory.py` — insert after `PaperTriageAgent()`, BEFORE `LocalPaperParserAgent` (避免对将被丢弃的论文浪费 CPU 解析 PDF):
 
 ```python
 agents.extend([
+    PaperSelectionAgent(),       # ← 新增，在 parser 之前
     LocalPaperParserAgent(),
-    PaperSelectionAgent(),       # ← 新增
     PaperReaderAgent(),
     ...
 ])
