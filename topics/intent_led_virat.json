@@ -53,6 +53,7 @@
   },
   "experiment_metrics": ["ADE", "FDE", "miss_rate", "multimodal_diversity"],
   "codebase": {
+    "experiment_tag": "intention_baseline",
     "repo_path": "D:/Codes/VS/Intent-LED-mul-agent",
     "copy_can_modify": true,
     "exploration_mode": "high",

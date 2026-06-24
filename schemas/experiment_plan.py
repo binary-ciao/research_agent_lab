@@ -20,3 +20,4 @@ class ExperimentPlan:
     acceptance_criteria: dict[str, object] = field(default_factory=dict)
     success_criteria: dict[str, object] = field(default_factory=dict)
     rollback_plan: str = ""
+    commands: list[str] = field(default_factory=list)
