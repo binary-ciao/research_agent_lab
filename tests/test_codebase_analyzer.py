@@ -51,5 +51,38 @@ class CodebaseAnalyzerTest(unittest.TestCase):
             self.assertTrue(report.integration_points)
 
 
+class CodebaseAnalyzerExperimentTagTest(unittest.TestCase):
+    def test_experiment_tag_from_topic_pack(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "work.md").write_text("# test", encoding="utf-8")
+            topic = TopicPack.from_mapping({
+                "topic_name": "test",
+                "codebase": {
+                    "repo_path": str(root),
+                    "experiment_tag": "custom_tag",
+                    "allowed_auto_edit": [],
+                },
+            })
+            report = CodebaseAnalyzer().analyze(topic)
+            self.assertEqual(len(report.smoke_commands), 2)
+            self.assertIn("--info custom_tag", report.smoke_commands[0])
+            self.assertIn("--info custom_tag", report.smoke_commands[1])
+
+    def test_experiment_tag_default_when_absent(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "work.md").write_text("# test", encoding="utf-8")
+            topic = TopicPack.from_mapping({
+                "topic_name": "test",
+                "codebase": {
+                    "repo_path": str(root),
+                    "allowed_auto_edit": [],
+                },
+            })
+            report = CodebaseAnalyzer().analyze(topic)
+            self.assertIn("--info motion_condition", report.smoke_commands[0])
+
+
 if __name__ == "__main__":
     unittest.main()

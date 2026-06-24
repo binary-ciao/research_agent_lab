@@ -133,7 +133,7 @@ class CodebaseAnalyzer:
 
     def _smoke_commands(self, topic: TopicPack) -> list[str]:
         repo = topic.codebase.get("repo_path", "")
-        info = "motion_condition"
+        info = topic.codebase.get("experiment_tag", "motion_condition")
         return [
             f"cd /d {repo} && python main_led_nba.py --cfg led_virat_intent_debug --gpu 0 --train 1 --info {info}",
             f"cd /d {repo} && python main_led_nba.py --cfg led_virat_intent_debug --gpu 0 --train 0 --info {info}",
