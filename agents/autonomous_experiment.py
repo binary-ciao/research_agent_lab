@@ -84,10 +84,11 @@ class AutonomousExperimentAgent(Agent):
 
         success_criteria = plan.get("success_criteria")
 
-        smoke_commands = self._smoke_commands(state)
+        commands = self._resolve_commands(state, plan)
+        commands = self._apply_budget(commands, context.settings)
         results: list[dict] = []
-        for cmd in smoke_commands:
-            result = self._execute_and_parse(experiment_id, cmd, work_dir, state, success_criteria)
+        for cmd in commands:
+            result = self._execute_and_parse(experiment_id, cmd, work_dir, state, success_criteria, context.settings)
             result.attempt = attempt
             result.patch_id = patch_dict.get("patch_id", "") if patch_dict else ""
             result.work_dir = work_dir
@@ -97,12 +98,29 @@ class AutonomousExperimentAgent(Agent):
                 break
         return results
 
-    def _smoke_commands(self, state: ResearchState) -> list[str]:
+    def _resolve_commands(self, state: ResearchState, plan: dict) -> list[str]:
+        plan_commands = plan.get("commands", []) or []
+        if plan_commands:
+            return [_rewrite_python(cmd) for cmd in plan_commands]
+
         report = state.values.get("codebase_report", {})
         commands = report.get("smoke_commands", [])
         if not commands:
             commands = ["python -c \"print('no smoke commands configured; nothing to run')\""]
         return [_rewrite_python(cmd) for cmd in commands]
+
+    def _apply_budget(self, commands: list[str], settings: dict) -> list[str]:
+        epochs = settings.get("train_budget_epochs")
+        if not epochs:
+            return commands
+        result = []
+        for cmd in commands:
+            if "--max_epochs" in cmd:
+                cmd = re.sub(r"--max_epochs\s+\d+", f"--max_epochs {epochs}", cmd)
+            else:
+                cmd += f" --max_epochs {epochs}"
+            result.append(cmd)
+        return result
 
     def _execute_and_parse(
         self,
@@ -111,13 +129,17 @@ class AutonomousExperimentAgent(Agent):
         work_dir: str,
         state: ResearchState,
         success_criteria: dict | None = None,
+        settings: dict | None = None,
     ) -> ExperimentResult:
         cwd, clean_command = _normalize_command(command, work_dir)
         executor = ScopedCodeExecutor(work_dir)
         cmd_parts = shlex.split(clean_command)
         start = time.monotonic()
         try:
-            completed = executor.run(cmd_parts, cwd=cwd, timeout=_SMOKE_TIMEOUT)
+            timeout = _SMOKE_TIMEOUT
+            if settings and settings.get("train_budget_minutes"):
+                timeout = min(_SMOKE_TIMEOUT, int(settings["train_budget_minutes"]) * 60)
+            completed = executor.run(cmd_parts, cwd=cwd, timeout=timeout)
             duration = round(time.monotonic() - start, 2)
             return parse_experiment_output(
                 experiment_id=experiment_id,

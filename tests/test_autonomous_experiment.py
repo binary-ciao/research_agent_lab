@@ -188,5 +188,94 @@ class NormalizeCommandTest(TestCase):
         self.assertIn("--train 0", clean)
 
 
+class ResolveCommandsTest(TestCase):
+    def test_uses_plan_commands_when_present(self):
+        agent = AutonomousExperimentAgent()
+        state = _make_state("/fake", [])
+        plan = {"commands": ["python -c \"print('plan_cmd')\""]}
+        result = agent._resolve_commands(state, plan)
+        self.assertEqual(len(result), 1)
+        self.assertIn("plan_cmd", result[0])
+
+    def test_falls_back_to_smoke_when_plan_commands_empty(self):
+        agent = AutonomousExperimentAgent()
+        state = _make_state("/fake", ["python -c \"print('smoke_cmd')\""])
+        plan = {"commands": []}
+        result = agent._resolve_commands(state, plan)
+        self.assertEqual(len(result), 1)
+        self.assertIn("smoke_cmd", result[0])
+
+    def test_falls_back_to_smoke_when_plan_commands_missing(self):
+        agent = AutonomousExperimentAgent()
+        state = _make_state("/fake", ["python -c \"print('smoke_cmd')\""])
+        plan = {}
+        result = agent._resolve_commands(state, plan)
+        self.assertEqual(len(result), 1)
+        self.assertIn("smoke_cmd", result[0])
+
+    def test_noop_fallback_when_both_empty(self):
+        agent = AutonomousExperimentAgent()
+        state = _make_state("/fake", [])
+        plan = {}
+        result = agent._resolve_commands(state, plan)
+        self.assertEqual(len(result), 1)
+        self.assertIn("no smoke commands configured", result[0])
+
+
+class ApplyBudgetTest(TestCase):
+    def test_appends_max_epochs_when_missing(self):
+        agent = AutonomousExperimentAgent()
+        cmds = ["python train.py --train 1"]
+        result = agent._apply_budget(cmds, {"train_budget_epochs": 5})
+        self.assertIn("--max_epochs 5", result[0])
+
+    def test_replaces_max_epochs_when_present(self):
+        agent = AutonomousExperimentAgent()
+        cmds = ["python train.py --max_epochs 100 --train 1"]
+        result = agent._apply_budget(cmds, {"train_budget_epochs": 5})
+        self.assertIn("--max_epochs 5", result[0])
+        self.assertNotIn("100", result[0])
+
+    def test_noop_when_budget_none(self):
+        agent = AutonomousExperimentAgent()
+        cmds = ["python train.py --train 1"]
+        result = agent._apply_budget(cmds, {"train_budget_epochs": None})
+        self.assertEqual(result, cmds)
+
+    def test_noop_when_budget_missing(self):
+        agent = AutonomousExperimentAgent()
+        cmds = ["python train.py --train 1"]
+        result = agent._apply_budget(cmds, {})
+        self.assertEqual(result, cmds)
+
+    def test_handles_multiple_commands(self):
+        agent = AutonomousExperimentAgent()
+        cmds = [
+            "python train.py --train 1",
+            "python train.py --max_epochs 50 --train 0",
+        ]
+        result = agent._apply_budget(cmds, {"train_budget_epochs": 3})
+        self.assertIn("--max_epochs 3", result[0])
+        self.assertIn("--max_epochs 3", result[1])
+
+
+class ExecuteAndParseBudgetTest(TestCase):
+    def test_respects_budget_timeout_when_set(self):
+        with TemporaryDirectory() as tmp:
+            work = Path(tmp) / "repo"
+            work.mkdir()
+            agent = AutonomousExperimentAgent()
+            state = _make_state(str(work), [])
+            result = agent._execute_and_parse(
+                experiment_id="test",
+                command="python -c \"print('ADE: 0.3')\"",
+                work_dir=str(work),
+                state=state,
+                success_criteria=None,
+                settings={"train_budget_minutes": 5},
+            )
+            self.assertEqual(result.status, "passed")
+
+
 if __name__ == "__main__":
     main()
