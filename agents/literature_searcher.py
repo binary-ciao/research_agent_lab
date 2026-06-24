@@ -110,7 +110,7 @@ class LiteratureSearchAgent(Agent):
         artifact_ids: list[str] = []
         for index, seed in enumerate(seeds, start=1):
             query = seed["query"]
-            if context.tool_registry and context.tool_registry.has("arxiv") and context.settings.get("online"):
+            if context.tool_registry and context.tool_registry.has("arxiv"):
                 output = context.tool_registry.call("arxiv", query, max_results=1)
                 for item in output.items:
                     if isinstance(item, Paper):

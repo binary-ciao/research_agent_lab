@@ -10,6 +10,8 @@ from core.artifact_store import ArtifactStore
 from core.state import ResearchState
 from memory.literature_memory import LiteratureMemoryStore
 from schemas.topic_pack import TopicPack
+from tools.arxiv_tool import ArxivTool
+from tools.tool_registry import ToolRegistry
 
 
 def _topic() -> TopicPack:
@@ -128,6 +130,39 @@ class ReferenceExpansionSearchTest(TestCase):
                     for title in titles
                 )
             )
+
+    def test_reference_seeds_online_path_does_not_require_settings_online_key(self):
+        """Reference seed arXiv path works when tool_registry has arxiv, regardless of settings."""
+        with TemporaryDirectory() as tmp:
+            lit_store = LiteratureMemoryStore(Path(tmp) / "lit.sqlite3")
+            lit_store.write_reference(
+                {
+                    "ref_id": "ref_online",
+                    "title": "Online Reference Paper",
+                    "source_paper_id": "paper_online",
+                    "relevance_score": 0.95,
+                },
+                "intent_led_virat",
+            )
+            state = ResearchState(topic=_topic())
+            tools = ToolRegistry()
+            tools.register(ArxivTool(max_results=3))
+
+            ctx = AgentContext(
+                artifact_store=ArtifactStore(Path(tmp)),
+                memory_store=None,
+                tool_registry=tools,
+                settings={
+                    "max_papers": 3,
+                    "enable_reference_expansion": True,
+                    "max_reference_seeds": 1,
+                },
+            )
+
+            result = LiteratureSearchAgent(lit_memory_store=lit_store).run(state, ctx)
+
+            papers = state.values["papers"]
+            self.assertGreaterEqual(len(papers), 1)
 
 
 if __name__ == "__main__":
