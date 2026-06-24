@@ -196,5 +196,42 @@ class SynthesisAndPlannerLLMTest(unittest.TestCase):
             self.assertEqual(state.values["experiment_planner_llm_call_count"], 0)
 
 
+class ExperimentPlannerCommandsTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.old_key = os.environ.get("DEEPSEEK_API_KEY")
+        os.environ["DEEPSEEK_API_KEY"] = "sk-test-key-for-route-enable"
+
+    def tearDown(self) -> None:
+        if self.old_key is None:
+            os.environ.pop("DEEPSEEK_API_KEY", None)
+        else:
+            os.environ["DEEPSEEK_API_KEY"] = self.old_key
+
+    def test_plan_from_payload_extracts_commands(self):
+        agent = ExperimentPlannerAgent()
+        state = ResearchState(topic=make_topic())
+        state.values["opportunities"] = [{"title": "test", "hypothesis": "test", "technical_strategy": "test"}]
+        state.values["codebase_report"] = {"suggested_first_patch_files": []}
+        base_plan = agent._rule_based_plan(state)
+        payload = {
+            "name": "test",
+            "hypothesis": "test",
+            "files_to_change": [],
+            "commands": ["python train.py --train 1 --max_epochs 10"],
+        }
+        plan = agent._plan_from_payload(state, payload, base_plan)
+        self.assertEqual(plan.commands, ["python train.py --train 1 --max_epochs 10"])
+
+    def test_plan_from_payload_commands_default_to_empty(self):
+        agent = ExperimentPlannerAgent()
+        state = ResearchState(topic=make_topic())
+        state.values["opportunities"] = [{"title": "test", "hypothesis": "test", "technical_strategy": "test"}]
+        state.values["codebase_report"] = {"suggested_first_patch_files": []}
+        base_plan = agent._rule_based_plan(state)
+        payload = {"name": "test", "hypothesis": "test", "files_to_change": []}
+        plan = agent._plan_from_payload(state, payload, base_plan)
+        self.assertEqual(plan.commands, [])
+
+
 if __name__ == "__main__":
     unittest.main()

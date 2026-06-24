@@ -186,6 +186,7 @@ class ExperimentPlannerAgent(Agent):
             "ablation_studies",
             "acceptance_criteria",
             "rollback_plan",
+            "commands",
         ]
         return [
             {
@@ -200,7 +201,8 @@ class ExperimentPlannerAgent(Agent):
                 "role": "user",
                 "content": (
                     f"Required fields: {', '.join(fields)}\n"
-                    "The plan must include concrete files_to_change, smoke-test commands inside training_config, "
+                    "The plan must include concrete files_to_change, commands (list of shell command strings like "
+                    "['python main.py --train 1 --max_epochs 5']), "
                     "ablation_studies, acceptance_criteria, and rollback_plan. "
                     "Do not claim metric improvement before an experiment runs.\n\n"
                     + json.dumps(payload, ensure_ascii=False, indent=2)[:15000]
@@ -238,6 +240,7 @@ class ExperimentPlannerAgent(Agent):
             ),
             acceptance_criteria=criteria,
             rollback_plan=self._as_str(payload.get("rollback_plan"), base_plan.rollback_plan),
+            commands=self._as_str_list(payload.get("commands"), base_plan.commands),
         )
 
     def _baseline_hint(self, state: ResearchState) -> str:
