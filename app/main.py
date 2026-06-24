@@ -114,6 +114,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=5,
         help="Maximum selected papers to judge when retrieval judge is enabled",
     )
+    run_parser.add_argument(
+        "--train-budget-epochs",
+        type=int,
+        default=None,
+        help="Max training epochs per experiment",
+    )
+    run_parser.add_argument(
+        "--train-budget-minutes",
+        type=int,
+        default=None,
+        help="Max training minutes per experiment command",
+    )
 
     agentlab_parser = subparsers.add_parser(
         "agentlab-config",
@@ -252,6 +264,8 @@ def run_workflow(args: argparse.Namespace) -> int:
         enable_retrieval_evaluation=args.enable_retrieval_evaluation,
         enable_retrieval_judge=args.enable_retrieval_judge,
         retrieval_judge_top_k=args.retrieval_judge_top_k,
+        train_budget_epochs=args.train_budget_epochs,
+        train_budget_minutes=args.train_budget_minutes,
     )
     state = workflow.run(topic)
 

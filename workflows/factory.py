@@ -54,6 +54,8 @@ def build_full_research_workflow(
     enable_retrieval_evaluation: bool = False,
     enable_retrieval_judge: bool = False,
     retrieval_judge_top_k: int = 5,
+    train_budget_epochs: int | None = None,
+    train_budget_minutes: int | None = None,
 ) -> Workflow:
     agents: list = [
         ResearchManagerAgent(),
@@ -117,5 +119,7 @@ def build_full_research_workflow(
             "enable_retrieval_evaluation": enable_retrieval_evaluation,
             "enable_retrieval_judge": enable_retrieval_judge,
             "retrieval_judge_top_k": retrieval_judge_top_k,
+            "train_budget_epochs": train_budget_epochs,
+            "train_budget_minutes": train_budget_minutes,
         },
     )

@@ -58,6 +58,30 @@ class CliParserTest(unittest.TestCase):
         self.assertTrue(args.enable_reference_expansion)
         self.assertEqual(args.max_reference_seeds, 3)
 
+    def test_train_budget_epochs_flag_parses(self):
+        from app.main import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args([
+            "run",
+            "--topic", "topics/intent_led_virat.json",
+            "--train-budget-epochs", "5",
+        ])
+
+        self.assertEqual(args.train_budget_epochs, 5)
+
+    def test_train_budget_minutes_flag_parses(self):
+        from app.main import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args([
+            "run",
+            "--topic", "topics/intent_led_virat.json",
+            "--train-budget-minutes", "30",
+        ])
+
+        self.assertEqual(args.train_budget_minutes, 30)
+
 
 class RetrievalEvaluationCliParserTest(unittest.TestCase):
     def test_retrieval_evaluation_flags_parse(self):
