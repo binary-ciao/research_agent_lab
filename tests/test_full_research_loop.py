@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import patch
 import unittest
 
 from core.artifact_store import ArtifactStore
@@ -14,7 +15,8 @@ from workflows.factory import build_full_research_workflow
 
 
 class FullResearchLoopTest(unittest.TestCase):
-    def test_offline_workflow_produces_reviewable_artifacts(self) -> None:
+    @patch("sys.stdin.isatty", return_value=False)
+    def test_offline_workflow_produces_reviewable_artifacts(self, _mock_isatty) -> None:
         topic = load_topic_pack(Path("topics/pedestrian_diffusion.json"))
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -172,7 +174,8 @@ class RetrievalEvaluationCliParserTest(unittest.TestCase):
 
 
 class RetrievalEvaluationWorkflowTest(unittest.TestCase):
-    def test_offline_workflow_can_write_retrieval_evaluation(self):
+    @patch("sys.stdin.isatty", return_value=False)
+    def test_offline_workflow_can_write_retrieval_evaluation(self, _mock_isatty):
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             store = ArtifactStore(tmp_path / "runs")

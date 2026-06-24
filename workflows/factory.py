@@ -17,6 +17,7 @@ from agents import (
     MethodCardRetrieverAgent,
     OpportunityAgent,
     PaperReaderAgent,
+    PaperSelectionAgent,
     PaperTriageAgent,
     ReferenceExtractorAgent,
     ResearchManagerAgent,
@@ -67,6 +68,7 @@ def build_full_research_workflow(
     if enable_retrieval_evaluation:
         agents.append(RetrievalEvaluationAgent())
     agents.extend([
+        PaperSelectionAgent(),
         LocalPaperParserAgent(),
         PaperReaderAgent(),
         ReferenceExtractorAgent(),

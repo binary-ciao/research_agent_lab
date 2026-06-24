@@ -18,6 +18,7 @@ from agents.method_card_extractor import MethodCardExtractorAgent
 from agents.method_card_retriever import MethodCardRetrieverAgent
 from agents.opportunity_agent import OpportunityAgent
 from agents.paper_reader import PaperReaderAgent
+from agents.paper_selector import PaperSelectionAgent
 from agents.paper_triage import PaperTriageAgent
 from agents.reference_extractor import ReferenceExtractorAgent
 from agents.research_manager import ResearchManagerAgent
@@ -50,6 +51,7 @@ __all__ = [
     "MethodCardRetrieverAgent",
     "OpportunityAgent",
     "PaperReaderAgent",
+    "PaperSelectionAgent",
     "PaperTriageAgent",
     "ReferenceExtractorAgent",
     "ResearchManagerAgent",
