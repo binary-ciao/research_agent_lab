@@ -1,6 +1,6 @@
 # Research Agent Lab 项目交接说明
 
-更新时间：2026-06-18（P14 完成）
+更新时间：2026-06-24（P17 实施中）
 
 ## 1. 文档目的
 
@@ -228,6 +228,14 @@ Topic 名：`intent_conditioned_led_virat`。
 
 `RunEvaluationAgent`（P11）：确定性运行质量门禁，评分、阻断和警告检查。
 
+`ExperimentOrchestratorAgent`（P15/P16）：内部封装 CodeWriter → experiment run → AutoDebugger → retry 循环。
+
+`CodeWriterAgent`（P15/P16）：受 `--enable-code-writes`、Topic `ProjectSafetyPolicy`、CodeTask allowed/protected 路径约束，写入前备份并记录 CodePatch。
+
+`AutoDebuggerAgent`（P16）：解析 traceback，构造安全上下文，调用 LLM 生成 `fix_file_contents`，写 `llm_calls` 和 `auto_debug_records`。
+
+`RunValidationAgent`（P17）：验证 run artifact 完整性、跨 artifact 链接和 secret 泄漏风险。
+
 ## 9. 已实现工具
 
 `tools/env_loader.py`：加载 `.env` 并 mask secret。
@@ -251,6 +259,8 @@ Topic 名：`intent_conditioned_led_virat`。
 `tools/arxiv_tool.py`：arXiv 工具接口。
 
 `tools/git_tool.py`：Git 工具接口。
+
+`tools/run_artifact_validator.py`（P17）：验证 run 目录、artifact index、state artifacts、cross-links 和 secret-like values。
 
 `tools/test_runner.py`：测试工具接口。
 
@@ -432,6 +442,10 @@ debug checkpoint 曾生成在 `results/led_virat_intent_debug/motion_condition/m
 
 `D:\Develop_Tools\Anaconda3\envs\video_llava\python.exe -m app.main run --topic topics\intent_led_virat.json --data-dir data --max-papers 4 --enable-retrieval-evaluation --enable-retrieval-judge --enable-llm --llm-call-budget 2 --llm-token-budget 12000 --retrieval-judge-top-k 3`
 
+验证已有 run：
+
+`D:\Develop_Tools\Anaconda3\envs\video_llava\python.exe -m app.main validate-run --run-dir data\runs\<run_id> --strict`
+
 ## 15. 当前测试状态
 
 P11 新增 `test_run_evaluator.py`（9 个测试）。
@@ -439,7 +453,7 @@ P12 新增 `test_reference_extractor.py`（20 个测试），追加 `test_sectio
 P13 追加 `test_reference_memory.py`（3 个测试）、`test_reference_seed_builder.py`（4 个测试）、`test_reference_expansion_search.py`（2 个测试）、`test_run_evaluation_trends.py`（2 个测试），追加 `test_full_research_loop.py` CliParserTest（1 个测试），共 12 个测试。
 P14 新增 `test_retrieval_evaluator.py`（11 个测试），追加 `test_run_evaluator.py` RunEvaluationRetrievalIntegrationTest（3 个测试），追加 `test_full_research_loop.py` RetrievalEvaluationCliParserTest 和 RetrievalEvaluationWorkflowTest（2 个测试）。
 
-当前完整测试数：244 个，全部通过。
+当前完整测试数：316 个，全部通过。
 
 验证命令：`D:\Develop_Tools\Anaconda3\envs\video_llava\python.exe -m unittest discover -s tests`。
 
@@ -529,12 +543,20 @@ agent 之间传递结构化 artifact，不传自由聊天文本。
 - 多 run 评估趋势分析：`summarize-runs` 命令和趋势阅读器，持久化 run_evaluation 历史
 - 参考文献网络检索：将 extracted_references 接入 LiteratureSearchAgent 作为补充检索种子（--enable-reference-expansion）
 - 检索质量评估：RetrievalEvaluationAgent 确定性指标 + 可选 LLM judge（P14）
+- 实验编排闭环：CodeWriterAgent（路径安全策略、备份、CodePatch 记录）+ AutoDebuggerAgent（traceback 解析、LLM 修复、auto_debug_records）+ ExperimentOrchestratorAgent（封装 CodeWriter → run → AutoDebugger → retry 循环）（P15/P16）
+- CodePatch schema：记录修改前备份、diff、状态和关联的 CodeTask/ExperimentPlan（P15）
+- AutoDebugRecord schema：记录 debug 来源、traceback、LLM 修复建议和关联的 llm_call_id（P16）
+- 路径安全策略：ProjectSafetyPolicy 验证 allowed/protected 路径，`--enable-code-writes` 显式门禁（P15）
+- P15 记忆持久化 finalization check：验证 run 结束后记忆写入完整性，确保 lit_references 等表数据跨 run 可用
+- RunValidationAgent：验证 run artifact 完整性、跨 artifact 链接和 secret 泄漏风险（P17）
+- `run_artifact_validator.py`：核心验证逻辑（artifact index、state artifacts、cross-links、secret detection）（P17）
+- `validate-run` CLI：`app.main validate-run --run-dir <dir> --strict`（P17）
+- 动态验证矩阵：离线 minimal、retrieval evaluation、LLM budget-zero、experiment smoke、real API smoke（P17）
 
 ### 下一步
 
 - P11 运行验证：真实 DeepSeek API smoke run（`--enable-llm --llm-call-budget 6`）确认 run_evaluation 在 API 场景正确打分
 - 轻量 hybrid retrieval：结合关键词 + 参考文献网络扩展检索
-- P15 记忆持久化 finalization check：验证 run 结束后记忆写入完整性，确保 lit_references 等表数据跨 run 可用
 
 ## 19. 暂不建议做的事
 

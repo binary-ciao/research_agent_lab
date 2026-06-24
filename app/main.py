@@ -145,6 +145,22 @@ def build_parser() -> argparse.ArgumentParser:
     summarize_parser.add_argument("--data-dir", default="data")
     summarize_parser.add_argument("--limit", type=int, default=20)
 
+    validate_parser = subparsers.add_parser(
+        "validate-run",
+        help="Validate an existing run directory for artifact integrity",
+    )
+    validate_parser.add_argument("--run-dir", required=True)
+    validate_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print full validation JSON",
+    )
+    validate_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Return exit code 1 when validation status is block",
+    )
+
     return parser
 
 
@@ -294,6 +310,26 @@ def main() -> int:
         summary = summarize_run_evaluations(Path(args.data_dir) / "runs", limit=args.limit)
         print(format_run_evaluation_summary(summary))
         return 0
+    if args.command == "validate-run":
+        import json
+        from tools.run_artifact_validator import report_to_dict, validate_run_dir
+
+        report = validate_run_dir(Path(args.run_dir), expect_completed=True)
+        payload = report_to_dict(report)
+        if args.json:
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+        else:
+            print(f"run_id={report.run_id}")
+            print(f"run_dir={report.run_dir}")
+            print(f"validation_status={report.status}")
+            print(f"validation_score={report.score}")
+            print(f"blocking_issues={len(report.blocking_issues)}")
+            print(f"warnings={len(report.warnings)}")
+            for issue in report.blocking_issues[:5]:
+                print(f"BLOCKER: {issue}")
+            for warning in report.warnings[:5]:
+                print(f"WARNING: {warning}")
+        return 1 if args.strict and report.status == "block" else 0
     parser.error(f"unknown command: {args.command}")
     return 2
 

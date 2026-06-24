@@ -23,6 +23,7 @@ from agents import (
     RetrievalEvaluationAgent,
     ReviewerAgent,
     RunEvaluationAgent,
+    RunValidationAgent,
     SynthesisAgent,
     TreePrunerAgent,
     TreeSearchAgent,
@@ -89,6 +90,7 @@ def build_full_research_workflow(
         agents.append(TreeSearchAgent(lit_memory_store=literature_memory_store))
     agents.append(ReviewerAgent())
     agents.append(RunEvaluationAgent())
+    agents.append(RunValidationAgent())
     agents.append(LiteratureMemoryPersistenceAgent(lit_memory_store=literature_memory_store))
 
     return Workflow(

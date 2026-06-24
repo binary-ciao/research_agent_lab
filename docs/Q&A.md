@@ -910,7 +910,44 @@ A：有三个：
 
 3. “MCP”不是本项目已经完成的协议层，而是后续工具生态标准化的目标方向。
 
-## 14. 下一步演进
+## 17. P17 Run Validation
+
+### Q：RunEvaluationAgent 和 RunValidationAgent 有什么区别？
+
+A：`RunEvaluationAgent` 评价一次 run 的科研和流程质量，例如文献是否足够、LLM budget 是否超限、实验结果是否解析、review 是否 pass。`RunValidationAgent` 验证 run 是否可交付复盘，例如 `state.json` 是否存在、artifact index 是否指向真实文件、`AutoDebugRecord.llm_call_id` 是否能找到对应 `llm_calls`、是否有疑似 API key 泄漏。前者回答"这个 run 是否值得继续"，后者回答"这个 run 是否可被别人复现和审查"。
+
+### Q：如何检查一次失败的 run？
+
+A：先看 `state.json` 的 `stage` 字段确定哪个 agent 失败，然后：
+1. 检查 `artifacts/` 下该 agent 对应的产物是否存在
+2. 用 `validate-run --run-dir <run_dir>` 检查 artifact 完整性和 cross-link
+3. 看 `notes` 字段中的 agent 执行说明
+4. 如果 LLM 调用失败，检查 `artifacts/llm_calls/` 中的 `status` 和 `error` 字段
+
+### Q：如何验证一个已完成 run？
+
+A：使用：
+
+`D:\Develop_Tools\Anaconda3\envs\video_llava\python.exe -m app.main validate-run --run-dir data\runs\<run_id> --strict`
+
+如果返回 `validation_status=block`，先看 `BLOCKER:` 行。常见原因是 artifact 文件缺失、cross-link 丢失或 artifact 中出现疑似 secret。
+
+### Q：哪些临时文件可以清理？
+
+A：可以安全清理的内容：
+- `tmp/p17_validation/` 下的 smoke 测试输出（保留为证据或清理）
+- `data/runs/` 中的旧 run 目录（确认不需要复盘后）
+- `__pycache__/` 目录
+- `*.pyc` 文件
+
+不应删除的内容：
+- `data/backups/` 下的关键备份
+- `.env` 和 `.env.example`
+- 本地论文库目录
+- `external/AgentLaboratory/`
+- `tmp_dynamic_audit.py` 和 `tmp/p16_offline_smoke/`（P16 验证证据，除非 P17 验证完成后确认可清理）
+
+## 15. 下一步演进
 
 ### Q43：P9 后下一步最有价值的开发方向是什么？
 
@@ -967,7 +1004,7 @@ L3：自动科研闭环
 
 当前已经完成 L2 的最小闭环，并具备 L3 的两个基础组件：跨 run 文献/方法记忆和实验树分支。后续 P9 的重点是让实验树分支被选择、执行、剪枝和复盘。
 
-## 15. 开发规范
+## 16. 开发规范
 
 ### Q47：新增 Agent 时要遵守什么？
 
@@ -1021,7 +1058,7 @@ A：
 - 失败日志要保留 tail。
 - Reviewer 必须参与最后状态判断。
 
-## 16. 术语速查
+## 18. 术语速查
 
 ### Q51：核心术语如何理解？
 
@@ -1043,7 +1080,7 @@ A：
 | Experiment Tree | 多个实验假设、结果和剪枝决策组成的搜索树 |
 | Reviewer | 检查证据、预算、指标、范围和结论可靠性的 Agent |
 
-## 17. 参考链接
+## 19. 参考链接
 
 - MCP Architecture：<https://modelcontextprotocol.io/docs/learn/architecture>
 - MCP Tools：<https://modelcontextprotocol.io/specification/2025-06-18/server/tools>

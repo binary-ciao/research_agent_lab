@@ -66,4 +66,7 @@ class ProjectSafetyPolicy:
         }
 
     def _normalize(self, path: str) -> str:
-        return path.replace("\\", "/").strip("/")
+        p = path.replace("\\", "/")
+        if p.endswith("/"):
+            p = p.rstrip("/") + "/*"
+        return p.lstrip("/")

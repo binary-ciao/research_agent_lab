@@ -25,6 +25,7 @@ from agents.retrieval_evaluator import RetrievalEvaluationAgent
 from agents.result_parser import ResultParserAgent
 from agents.reviewer_agent import ReviewerAgent
 from agents.run_evaluator import RunEvaluationAgent
+from agents.run_validation_agent import RunValidationAgent
 from agents.synthesis_agent import SynthesisAgent
 from agents.tree_pruner import TreePrunerAgent
 from agents.tree_search_agent import BranchToPlanAgent, TreeSearchAgent
@@ -56,6 +57,7 @@ __all__ = [
     "RetrievalEvaluationAgent",
     "ReviewerAgent",
     "RunEvaluationAgent",
+    "RunValidationAgent",
     "SynthesisAgent",
     "TreePrunerAgent",
     "TreeSearchAgent",

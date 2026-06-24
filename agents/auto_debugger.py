@@ -93,7 +93,7 @@ class AutoDebuggerAgent(Agent):
         # Check budget
         allowed, budget_reason = llm_budget_allows(state, context.settings)
         if not allowed:
-            self._write_llm_call_artifact(state, context.artifact_store, {
+            call_id = self._write_llm_call_artifact(state, context.artifact_store, {
                 "agent": "auto_debugger",
                 "experiment_id": experiment_id,
                 "result_id": failed_result.get("result_id", ""),
@@ -113,12 +113,13 @@ class AutoDebuggerAgent(Agent):
                 error_summary=f"skipped: {budget_reason}",
                 fix_description="",
                 fix_file_contents={},
+                llm_call_id=call_id,
             )
             return self._persist(record, state, context, experiment_id)
 
         # Check route enabled (provider=offline/local/rule_based OR API key missing)
         if route.provider in {"offline", "local", "rule_based"} or not route.enabled:
-            self._write_llm_call_artifact(state, context.artifact_store, {
+            call_id = self._write_llm_call_artifact(state, context.artifact_store, {
                 "agent": "auto_debugger",
                 "experiment_id": experiment_id,
                 "result_id": failed_result.get("result_id", ""),
@@ -136,12 +137,13 @@ class AutoDebuggerAgent(Agent):
                 error_summary="skipped: LLM route not enabled",
                 fix_description="",
                 fix_file_contents={},
+                llm_call_id=call_id,
             )
             return self._persist(record, state, context, experiment_id)
 
         # No usable context (includes case of no traceback and no plan files)
         if not contexts:
-            self._write_llm_call_artifact(state, context.artifact_store, {
+            call_id = self._write_llm_call_artifact(state, context.artifact_store, {
                 "agent": "auto_debugger",
                 "experiment_id": experiment_id,
                 "result_id": failed_result.get("result_id", ""),
@@ -159,6 +161,7 @@ class AutoDebuggerAgent(Agent):
                 error_summary=error_text[:500] if error_text else "no error message",
                 fix_description="no usable file context for LLM; manual review needed",
                 fix_file_contents={},
+                llm_call_id=call_id,
             )
             return self._persist(record, state, context, experiment_id)
 
@@ -166,56 +169,80 @@ class AutoDebuggerAgent(Agent):
         prompt = self._build_debug_prompt(experiment_id, attempt, plan, failed_result, code_patch, contexts, read_only)
         response = self.llm_client.chat(route, prompt, temperature=0.1, max_tokens=3000)
 
-        call_status = "ok" if response.ok else "error"
-        call_data: dict = {
-            "agent": "auto_debugger",
-            "experiment_id": experiment_id,
-            "result_id": failed_result.get("result_id", ""),
-            "patch_id": patch_id,
-            "status": call_status,
-            "provider": route.provider,
-            "model": route.model,
-            "route_enabled": route.enabled,
-            "usage": response.usage,
-            "error": response.error if not response.ok else "",
-        }
-        self._write_llm_call_artifact(state, context.artifact_store, call_data)
-
-        if response.ok:
-            record_llm_usage(state, response.usage)
-
-        # Parse and validate LLM response
+        call_id = self._new_llm_call_id()
         fix_description = ""
         fix_file_contents: dict[str, str] = {}
-        if response.ok:
-            payload = extract_json_object(response.text)
-            if payload is not None:
-                fix_description = str(payload.get("fix_description", ""))
-                raw_fixes = payload.get("fix_file_contents")
-                if isinstance(raw_fixes, dict):
-                    for fpath, fcontent in raw_fixes.items():
-                        if not isinstance(fpath, str) or not isinstance(fcontent, str):
-                            continue
-                        if fpath in read_only:
-                            continue  # reject overwrite of read_only_context files
-                        if fpath not in candidates:
-                            continue  # reject paths outside candidate list
-                        if Path(fpath).is_absolute() or ".." in Path(fpath).parts:
-                            continue
-                        fix_file_contents[fpath] = fcontent
-            else:
-                self._write_llm_call_artifact(state, context.artifact_store, {
-                    "agent": "auto_debugger",
-                    "experiment_id": experiment_id,
-                    "result_id": failed_result.get("result_id", ""),
-                    "patch_id": patch_id,
-                    "status": "invalid_json",
-                    "provider": route.provider,
-                    "model": route.model,
-                    "route_enabled": route.enabled,
-                    "usage": {},
-                    "error": "JSON parse failed",
-                })
+
+        if not response.ok:
+            self._write_llm_call_artifact(state, context.artifact_store, {
+                "agent": "auto_debugger",
+                "experiment_id": experiment_id,
+                "result_id": failed_result.get("result_id", ""),
+                "patch_id": patch_id,
+                "status": "error",
+                "provider": route.provider,
+                "model": route.model,
+                "route_enabled": route.enabled,
+                "usage": response.usage,
+                "error": response.error,
+            }, call_id)
+            record = AutoDebugRecord(
+                experiment_id=experiment_id,
+                result_id=failed_result.get("result_id", ""),
+                patch_id=patch_id,
+                attempt_number=attempt,
+                error_summary=f"LLM API error: {response.error}",
+                fix_description="",
+                fix_file_contents={},
+                llm_call_id=call_id,
+            )
+            return self._persist(record, state, context, experiment_id)
+
+        # API call succeeded — record usage
+        record_llm_usage(state, response.usage)
+
+        # Parse and validate LLM response
+        payload = extract_json_object(response.text)
+        if payload is not None:
+            fix_description = str(payload.get("fix_description", ""))
+            raw_fixes = payload.get("fix_file_contents")
+            if isinstance(raw_fixes, dict):
+                for fpath, fcontent in raw_fixes.items():
+                    if not isinstance(fpath, str) or not isinstance(fcontent, str):
+                        continue
+                    if fpath in read_only:
+                        continue  # reject overwrite of read_only_context files
+                    if fpath not in candidates:
+                        continue  # reject paths outside candidate list
+                    if Path(fpath).is_absolute() or ".." in Path(fpath).parts:
+                        continue
+                    fix_file_contents[fpath] = fcontent
+            self._write_llm_call_artifact(state, context.artifact_store, {
+                "agent": "auto_debugger",
+                "experiment_id": experiment_id,
+                "result_id": failed_result.get("result_id", ""),
+                "patch_id": patch_id,
+                "status": "ok",
+                "provider": route.provider,
+                "model": route.model,
+                "route_enabled": route.enabled,
+                "usage": response.usage,
+                "error": "",
+            }, call_id)
+        else:
+            self._write_llm_call_artifact(state, context.artifact_store, {
+                "agent": "auto_debugger",
+                "experiment_id": experiment_id,
+                "result_id": failed_result.get("result_id", ""),
+                "patch_id": patch_id,
+                "status": "invalid_json",
+                "transport_ok": True,
+                "provider": route.provider,
+                "model": route.model,
+                "route_enabled": route.enabled,
+                "usage": response.usage,
+                "error": "JSON parse failed",
+            }, call_id)
 
         record = AutoDebugRecord(
             experiment_id=experiment_id,
@@ -228,6 +255,7 @@ class AutoDebuggerAgent(Agent):
                 else "no traceback found; manual review needed"
             ),
             fix_file_contents=fix_file_contents,
+            llm_call_id=call_id,
         )
         return self._persist(record, state, context, experiment_id)
 
@@ -343,9 +371,11 @@ class AutoDebuggerAgent(Agent):
         import uuid
         return f"llm_call_{uuid.uuid4().hex[:12]}"
 
-    def _write_llm_call_artifact(self, state, artifact_store, call_data: dict):
-        call_id = self._new_llm_call_id()
+    def _write_llm_call_artifact(self, state, artifact_store, call_data: dict, call_id: str | None = None) -> str:
+        if call_id is None:
+            call_id = self._new_llm_call_id()
         artifact_store.save_json(state.run_id, "llm_calls", call_id, call_data)
+        return call_id
 
     def _persist(self, record: AutoDebugRecord, state: ResearchState, context: AgentContext, experiment_id: str) -> AgentResult:
         record_dict = asdict(record)

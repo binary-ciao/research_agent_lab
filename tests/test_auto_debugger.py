@@ -177,6 +177,7 @@ class AutoDebuggerAgentTest(TestCase):
             paths = context.artifact_store.list_artifacts(state.run_id, "llm_calls")
             self.assertTrue(len(paths) >= 1)
             record = state.values.get("last_debug_record", {})
+            self.assertTrue(record.get("llm_call_id"), "llm_call_id must be populated")
             self.assertEqual(record.get("fix_file_contents", {}), {})
 
     def test_route_disabled_records_llm_call(self):
@@ -265,11 +266,13 @@ class AutoDebuggerAgentTest(TestCase):
             self.assertIsNotNone(record.get("fix_file_contents"))
             self.assertIn("model.py", record.get("fix_file_contents", {}))
             self.assertIn("class Model:", record["fix_file_contents"]["model.py"])
+            self.assertTrue(record.get("llm_call_id"), "llm_call_id must be populated")
 
-    def test_invalid_json_records_llm_call(self):
+    def test_invalid_json_produces_single_artifact(self):
         from pathlib import Path
         from unittest.mock import patch
         from tools.llm_client import LLMResponse
+        import json
         with TemporaryDirectory() as tmp:
             work = Path(tmp) / "code"
             work.mkdir()
@@ -290,6 +293,7 @@ class AutoDebuggerAgentTest(TestCase):
             mock_response = LLMResponse(
                 ok=True, text="not valid json {{{",
                 provider="deepseek", model="deepseek-v4-flash",
+                usage={"total_tokens": 50},
             )
             with patch("agents.auto_debugger.ModelRouter") as mock_router:
                 mock_router.return_value.route_for.return_value = type("obj", (), {
@@ -300,8 +304,14 @@ class AutoDebuggerAgentTest(TestCase):
                     mock_client.chat.return_value = mock_response
                     result = agent.run(state, context)
             paths = context.artifact_store.list_artifacts(state.run_id, "llm_calls")
-            self.assertTrue(len(paths) >= 1)
+            # Must produce exactly 1 artifact, not 2 (the bug was writing ok + invalid_json)
+            self.assertEqual(len(paths), 1, f"Expected 1 artifact, got {len(paths)}")
+            art = json.loads(paths[0].read_text(encoding="utf-8"))
+            self.assertEqual(art.get("status"), "invalid_json")
+            self.assertTrue(art.get("transport_ok"))
+            # llm_call_id must be populated in record
             record = state.values.get("last_debug_record", {})
+            self.assertTrue(record.get("llm_call_id"), "llm_call_id must be populated")
             self.assertEqual(record.get("fix_file_contents", {}), {})
 
     def test_fix_file_contents_filters_non_candidate_keys(self):

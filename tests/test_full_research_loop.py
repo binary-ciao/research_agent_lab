@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import TestCase
 import unittest
 
 from core.artifact_store import ArtifactStore
@@ -102,6 +103,26 @@ class RetrievalEvaluationWorkflowTest(unittest.TestCase):
                 len(list((run_dir / "artifacts" / "retrieval_evaluations").glob("*.json"))),
                 1,
             )
+
+
+class RunValidationWorkflowIntegrationTest(TestCase):
+    def test_run_validation_agent_runs_after_run_evaluator(self):
+        from core.artifact_store import ArtifactStore
+        from core.run_logger import RunLogger
+        from tools.tool_registry import build_default_tool_registry
+        from workflows.factory import build_full_research_workflow
+
+        with TemporaryDirectory() as tmp:
+            workflow = build_full_research_workflow(
+                artifact_store=ArtifactStore(Path(tmp) / "runs"),
+                memory_store=None,
+                tool_registry=build_default_tool_registry(),
+                logger=RunLogger(),
+            )
+            names = [agent.name for agent in workflow.agents]
+            self.assertIn("run_evaluator", names)
+            self.assertIn("run_validation_agent", names)
+            self.assertLess(names.index("run_evaluator"), names.index("run_validation_agent"))
 
 
 if __name__ == "__main__":

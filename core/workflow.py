@@ -9,6 +9,44 @@ from core.state import ResearchState
 from schemas.topic_pack import TopicPack
 from tools.tool_registry import ToolRegistry
 
+SENSITIVE_SETTING_NAMES = {
+    "api_key",
+    "apikey",
+    "secret",
+    "token",
+}
+
+
+def _is_sensitive_setting_key(key: object) -> bool:
+    name = str(key).lower()
+    return (
+        name in SENSITIVE_SETTING_NAMES
+        or name.endswith("_api_key")
+        or name.endswith("_secret")
+        or name.endswith("_token")
+        or name.endswith("_access_token")
+        or name.endswith("_refresh_token")
+        or name.endswith("_auth_token")
+    )
+
+
+def _public_workflow_settings(settings: dict) -> dict:
+    public: dict = {}
+    for key, value in settings.items():
+        if _is_sensitive_setting_key(key):
+            continue
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            public[str(key)] = value
+        elif isinstance(value, (list, tuple)):
+            public[str(key)] = list(value)
+        elif isinstance(value, dict):
+            public[str(key)] = {
+                str(k): v for k, v in value.items()
+                if not _is_sensitive_setting_key(k)
+                and (isinstance(v, (str, int, float, bool)) or v is None)
+            }
+    return public
+
 
 @dataclass(slots=True)
 class Workflow:
@@ -22,6 +60,7 @@ class Workflow:
 
     def run(self, topic: TopicPack) -> ResearchState:
         state = ResearchState(topic=topic)
+        state.values["workflow_settings"] = _public_workflow_settings(self.settings)
         context = AgentContext(
             artifact_store=self.artifact_store,
             memory_store=self.memory_store,

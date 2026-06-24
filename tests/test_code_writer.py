@@ -18,6 +18,24 @@ def _state() -> ResearchState:
     return state
 
 
+class ProjectSafetyPolicyTest(TestCase):
+    def test_normalize_preserves_directory_prefix(self):
+        from tools.project_safety import ProjectSafetyPolicy
+        policy = ProjectSafetyPolicy(repo_path="/tmp",
+            allowed_paths=["model/"], protected_paths=["model/secrets.py"])
+        self.assertTrue(policy.is_allowed("model/decoder.py"))
+        self.assertTrue(policy.is_allowed("model/sub/foo.py"))
+        self.assertFalse(policy.is_allowed("other/file.py"))
+        self.assertTrue(policy.is_protected("model/secrets.py"))
+
+    def test_normalize_exact_filename_still_works(self):
+        from tools.project_safety import ProjectSafetyPolicy
+        policy = ProjectSafetyPolicy(repo_path="/tmp",
+            allowed_paths=["model/decoder.py"], protected_paths=[])
+        self.assertTrue(policy.is_allowed("model/decoder.py"))
+        self.assertFalse(policy.is_allowed("model/other.py"))
+
+
 class CodeWriterAgentTest(TestCase):
     def test_skips_when_code_writes_disabled(self):
         with TemporaryDirectory() as tmp:
@@ -36,41 +54,111 @@ class CodeWriterAgentTest(TestCase):
 
     def test_rejects_absolute_path(self):
         agent = CodeWriterAgent()
-        ok, reason = agent._validate_paths(
-            ["/etc/passwd"], Path("/tmp/work"), ["model/"], []
-        )
+        ok, reason = agent._validate_paths(["/etc/passwd"], Path("/tmp/work"))
         self.assertFalse(ok)
         self.assertIn("absolute", reason.lower())
 
     def test_rejects_parent_traversal(self):
         agent = CodeWriterAgent()
-        ok, reason = agent._validate_paths(
-            ["../outside.py"], Path("/tmp/work"), ["model/"], []
-        )
+        ok, reason = agent._validate_paths(["../outside.py"], Path("/tmp/work"))
         self.assertFalse(ok)
         self.assertIn("..", reason)
 
     def test_rejects_path_outside_work_dir(self):
         agent = CodeWriterAgent()
         ok, reason = agent._validate_paths(
-            ["model/../../etc/hacked"], Path("/tmp/work/sub/proj"), ["model/"], []
-        )
+            ["model/../../etc/hacked"], Path("/tmp/work/sub/proj"))
         self.assertFalse(ok)
 
-    def test_rejects_protected_file(self):
+    def test_rejects_protected_file_via_fnmatch(self):
         agent = CodeWriterAgent()
         ok, reason = agent._validate_paths(
-            ["model/secrets.py"], Path("/tmp/work"), ["model/"], ["model/secrets.py"]
+            ["model/secrets.py"], Path("/tmp/work"),
+            allowed_paths=["model/"], protected_paths=["model/secrets.py"],
         )
         self.assertFalse(ok)
         self.assertIn("protected", reason.lower())
 
-    def test_accepts_valid_path_in_allowed(self):
+    def test_accepts_valid_path_in_allowed_via_fnmatch(self):
         agent = CodeWriterAgent()
         ok, reason = agent._validate_paths(
-            ["model/decoder.py"], Path("/tmp/work"), ["model/"], ["model/secrets.py"]
+            ["model/decoder.py"], Path("/tmp/work"),
+            allowed_paths=["model/"], protected_paths=["model/secrets.py"],
         )
         self.assertTrue(ok)
+
+    def test_accepts_valid_path_no_constraints(self):
+        agent = CodeWriterAgent()
+        ok, reason = agent._validate_paths(
+            ["model/decoder.py"], Path("/tmp/work"))
+        self.assertTrue(ok)
+
+    def test_codetask_narrower_than_topic_blocks(self):
+        """CodeTask allowed_paths can be narrower than topic-level — per-experiment restriction."""
+        with TemporaryDirectory() as tmp:
+            src_dir = Path(tmp) / "src"
+            src_dir.mkdir()
+            (src_dir / "model").mkdir(parents=True)
+            (src_dir / "model" / "decoder.py").write_text("x = 1")
+            (src_dir / "model" / "other.py").write_text("y = 2")
+            topic = TopicPack(topic_name="test", codebase={
+                "repo_path": str(src_dir), "copy_can_modify": True,
+                "allowed_auto_edit": ["model/"],  # topic: broad
+                "protected_files": [],
+            })
+            state = ResearchState(topic=topic)
+            state.values["experiment_plans"] = [{
+                "experiment_id": "exp_1", "hypothesis": "test",
+                "modification": "change", "files_to_change": ["model/other.py"],
+            }]
+            # CodeTask narrows to decoder.py only
+            state.values["code_tasks"] = [{
+                "task_id": "ct_1", "experiment_id": "exp_1",
+                "allowed_paths": ["model/decoder.py"], "protected_paths": [],
+            }]
+            context = AgentContext(
+                artifact_store=ArtifactStore(Path(tmp) / "runs"),
+                memory_store=None, tool_registry=None,
+                settings={"enable_code_writes": True},
+            )
+            agent = CodeWriterAgent()
+            agent.run(state, context)
+            patch = state.values["code_patches_by_experiment_id"]["exp_1"]
+            self.assertEqual(patch["status"], "blocked",
+                f"CodeTask narrowed to decoder.py, other.py should be blocked. Got: {patch.get('status')}")
+            self.assertIn("not in allowed", patch.get("reason", ""))
+
+    def test_glob_allowed_path_via_policy(self):
+        """Glob patterns like models/* must work through ProjectSafetyPolicy."""
+        with TemporaryDirectory() as tmp:
+            src_dir = Path(tmp) / "src"
+            src_dir.mkdir()
+            (src_dir / "models").mkdir(parents=True)
+            (src_dir / "models" / "a.py").write_text("x = 1")
+            topic = TopicPack(topic_name="test", codebase={
+                "repo_path": str(src_dir), "copy_can_modify": True,
+                "allowed_auto_edit": ["models/*"],
+                "protected_files": ["models/secrets.py"],
+            })
+            state = ResearchState(topic=topic)
+            state.values["experiment_plans"] = [{
+                "experiment_id": "exp_1", "hypothesis": "test",
+                "modification": "change", "files_to_change": ["models/a.py"],
+            }]
+            state.values["code_tasks"] = [{
+                "task_id": "ct_1", "experiment_id": "exp_1",
+                "allowed_paths": ["models/*"], "protected_paths": ["models/secrets.py"],
+            }]
+            context = AgentContext(
+                artifact_store=ArtifactStore(Path(tmp) / "runs"),
+                memory_store=None, tool_registry=None,
+                settings={"enable_code_writes": True},
+            )
+            agent = CodeWriterAgent()
+            agent.run(state, context)
+            patch = state.values["code_patches_by_experiment_id"]["exp_1"]
+            self.assertEqual(patch["status"], "applied",
+                f"Glob should allow models/a.py, got: {patch.get('status')} reason={patch.get('reason')}")
 
     def test_copy_mode_creates_work_dir(self):
         import shutil
@@ -190,6 +278,32 @@ class CodeWriterAgentTest(TestCase):
             patch = state.values["code_patches_by_experiment_id"]["exp_1"]
             # Should match ct_b, not ct_a
             self.assertEqual(patch["task_id"], "ct_b")
+
+    def test_code_task_match_status_applied(self):
+        with TemporaryDirectory() as tmp:
+            src_dir = Path(tmp) / "src"
+            src_dir.mkdir()
+            (src_dir / "model").mkdir(parents=True)
+            (src_dir / "model" / "decoder.py").write_text("x = 1")
+            state = _state()
+            state.topic.codebase["repo_path"] = str(src_dir)
+            state.topic.codebase["copy_can_modify"] = True
+            state.topic.codebase["allowed_auto_edit"] = ["model/"]
+            state.topic.codebase["protected_files"] = ["model/secrets.py"]
+            state.values["experiment_plans"] = [{
+                "experiment_id": "exp_1", "hypothesis": "test",
+                "modification": "change decoder", "files_to_change": ["model/decoder.py"],
+            }]
+            context = AgentContext(
+                artifact_store=ArtifactStore(Path(tmp) / "runs"),
+                memory_store=None, tool_registry=None,
+                settings={"enable_code_writes": True},
+            )
+            agent = CodeWriterAgent()
+            result = agent.run(state, context)
+            patch = state.values["code_patches_by_experiment_id"]["exp_1"]
+            self.assertEqual(patch["status"], "applied",
+                f"Expected status=applied, got status={patch.get('status')} reason={patch.get('reason')}")
 
     def test_code_task_missing_blocks(self):
         with TemporaryDirectory() as tmp:

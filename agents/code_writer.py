@@ -1,5 +1,6 @@
 from __future__ import annotations
 import difflib
+import fnmatch
 import hashlib
 import shutil
 from dataclasses import asdict
@@ -63,8 +64,9 @@ class CodeWriterAgent(Agent):
                 reason=f"no CodeTask matched experiment_id={experiment_id}",
             )
             return self._persist(patch, state, context, experiment_id)
-        allowed = task.get("allowed_paths", []) or []
-        protected = task.get("protected_paths", []) or []
+
+        task_allowed = task.get("allowed_paths", []) or []
+        task_protected = task.get("protected_paths", []) or []
 
         pending_fixes = state.values.get("pending_fixes_by_experiment_id", {})
         if experiment_id in pending_fixes and pending_fixes[experiment_id]:
@@ -104,7 +106,7 @@ class CodeWriterAgent(Agent):
             )
             return self._persist(patch, state, context, experiment_id)
 
-        changed_files, backups, ok, reason = self._apply_changes(changes, work_dir, allowed, protected)
+        changed_files, backups, ok, reason = self._apply_changes(changes, work_dir, task_allowed, task_protected)
         if not ok:
             patch = CodePatch(
                 experiment_id=experiment_id,
@@ -166,11 +168,11 @@ class CodeWriterAgent(Agent):
         shutil.copy2(str(file_path), str(bak))
         return bak
 
-    def _apply_changes(self, changes: dict[str, str], work_dir: Path, allowed: list[str], protected: list[str]) -> tuple[list[dict], dict[str, str], bool, str]:
+    def _apply_changes(self, changes: dict[str, str], work_dir: Path, allowed_paths: list[str] | None = None, protected_paths: list[str] | None = None) -> tuple[list[dict], dict[str, str], bool, str]:
         changed_files: list[dict] = []
         backups: dict[str, str] = {}
 
-        ok, reason = self._validate_paths(list(changes.keys()), work_dir, allowed, protected)
+        ok, reason = self._validate_paths(list(changes.keys()), work_dir, allowed_paths, protected_paths)
         if not ok:
             return [], {}, False, reason
 
@@ -205,7 +207,7 @@ class CodeWriterAgent(Agent):
 
         return changed_files, backups, True, ""
 
-    def _validate_paths(self, relative_paths: list[str], work_dir: Path, allowed_paths: list[str], protected_paths: list[str]) -> tuple[bool, str]:
+    def _validate_paths(self, relative_paths: list[str], work_dir: Path, allowed_paths: list[str] | None = None, protected_paths: list[str] | None = None) -> tuple[bool, str]:
         for rel in relative_paths:
             if not rel or rel != rel.strip():
                 return False, f"empty or whitespace-padded path: {rel!r}"
@@ -219,23 +221,21 @@ class CodeWriterAgent(Agent):
                 resolved.relative_to(work_resolved)
             except ValueError:
                 return False, f"resolved path {resolved} is outside work_dir {work_resolved}"
-            for protected in protected_paths:
-                if resolved == work_resolved / protected:
+            normalized = rel.replace("\\", "/").lstrip("/")
+            if allowed_paths:
+                if not any(fnmatch.fnmatch(normalized, self._fn_normalize(p)) for p in allowed_paths):
+                    return False, f"path {rel} not in allowed_paths"
+            if protected_paths:
+                if any(fnmatch.fnmatch(normalized, self._fn_normalize(p)) for p in protected_paths):
                     return False, f"protected file: {rel}"
-            in_allowed = False
-            if not allowed_paths:
-                in_allowed = True
-            else:
-                for a in allowed_paths:
-                    try:
-                        resolved.relative_to(work_resolved / a)
-                        in_allowed = True
-                        break
-                    except ValueError:
-                        continue
-            if not in_allowed:
-                return False, f"path {rel} not in allowed_paths"
         return True, ""
+
+    @staticmethod
+    def _fn_normalize(path: str) -> str:
+        p = path.replace("\\", "/")
+        if p.endswith("/"):
+            p = p.rstrip("/") + "/*"
+        return p.lstrip("/")
 
     def _persist(self, patch: CodePatch, state: ResearchState, context: AgentContext, experiment_id: str) -> AgentResult:
         patch_dict = asdict(patch)
