@@ -43,6 +43,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow agents with configured model routes to call external LLM APIs",
     )
     run_parser.add_argument(
+        "--no-enable-llm",
+        action="store_true",
+        dest="disable_llm",
+        help="Disable external LLM API calls (overrides topic pack default)",
+    )
+    run_parser.add_argument(
         "--llm-call-budget",
         type=int,
         default=3,
@@ -244,17 +250,38 @@ def run_workflow(args: argparse.Namespace) -> int:
     if args.online:
         tools.register(ArxivTool(max_results=args.max_papers))
 
+    # CLI > topic pack > system default
+    if args.disable_llm:
+        enable_llm_val = False
+    elif args.enable_llm:
+        enable_llm_val = True
+    else:
+        enable_llm_val = topic.metadata.get("enable_llm", True)
+
+    if args.enable_experiments:
+        enable_experiments_val = True
+    else:
+        enable_experiments_val = topic.metadata.get("enable_experiments", False)
+
+    if args.enable_code_writes:
+        enable_code_writes_val = True
+    else:
+        enable_code_writes_val = topic.metadata.get("enable_code_writes", False)
+
+    online_val = args.online or topic.metadata.get("online", False)
+
     workflow = build_full_research_workflow(
         artifact_store=store,
         memory_store=memory,
         tool_registry=tools,
         logger=logger,
         max_papers=args.max_papers,
-        enable_llm=args.enable_llm,
+        enable_llm=enable_llm_val,
         llm_call_budget=args.llm_call_budget,
         llm_token_budget=args.llm_token_budget,
-        enable_experiments=args.enable_experiments,
-        enable_code_writes=args.enable_code_writes,
+        enable_experiments=enable_experiments_val,
+        enable_code_writes=enable_code_writes_val,
+        online=online_val,
         max_debug_attempts=args.max_debug_attempts,
         enable_tree_search=args.enable_tree_search,
         literature_memory_store=lit_memory,

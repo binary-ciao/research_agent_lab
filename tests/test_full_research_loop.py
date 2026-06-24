@@ -82,6 +82,77 @@ class CliParserTest(unittest.TestCase):
 
         self.assertEqual(args.train_budget_minutes, 30)
 
+    def test_enable_llm_defaults_true_in_factory(self):
+        """Factory default for enable_llm is True."""
+        from workflows.factory import build_full_research_workflow
+        from core.artifact_store import ArtifactStore
+        from core.run_logger import RunLogger
+        from tools.tool_registry import build_default_tool_registry
+
+        with TemporaryDirectory() as tmp:
+            wf = build_full_research_workflow(
+                artifact_store=ArtifactStore(Path(tmp) / "runs"),
+                memory_store=SQLiteMemoryStore(Path(tmp) / "memory.sqlite3"),
+                tool_registry=build_default_tool_registry(),
+                logger=RunLogger(),
+            )
+            self.assertTrue(wf.settings["enable_llm"])
+
+    def test_no_enable_llm_flag_disables(self):
+        """--no-enable-llm flag produces disable_llm=True."""
+        from app.main import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args([
+            "run",
+            "--topic", "topics/intent_led_virat.json",
+            "--no-enable-llm",
+        ])
+        self.assertTrue(args.disable_llm)
+        self.assertFalse(args.enable_llm)
+
+    def test_topic_metadata_overrides_defaults(self):
+        """Topic pack metadata presets override system defaults when CLI silent."""
+        from app.main import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args([
+            "run",
+            "--topic", "topics/intent_led_virat.json",
+        ])
+        self.assertFalse(args.enable_llm)
+        self.assertFalse(args.disable_llm)
+
+    def test_cli_overrides_topic_metadata(self):
+        """CLI explicit flag overrides topic pack metadata."""
+        from app.main import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args([
+            "run",
+            "--topic", "topics/intent_led_virat.json",
+            "--enable-llm",
+        ])
+        self.assertTrue(args.enable_llm)
+        self.assertFalse(args.disable_llm)
+
+    def test_online_injected_to_settings(self):
+        """Factory injects online into workflow settings."""
+        from workflows.factory import build_full_research_workflow
+        from core.artifact_store import ArtifactStore
+        from core.run_logger import RunLogger
+        from tools.tool_registry import build_default_tool_registry
+
+        with TemporaryDirectory() as tmp:
+            wf = build_full_research_workflow(
+                artifact_store=ArtifactStore(Path(tmp) / "runs"),
+                memory_store=SQLiteMemoryStore(Path(tmp) / "memory.sqlite3"),
+                tool_registry=build_default_tool_registry(),
+                logger=RunLogger(),
+                online=True,
+            )
+            self.assertTrue(wf.settings["online"])
+
 
 class RetrievalEvaluationCliParserTest(unittest.TestCase):
     def test_retrieval_evaluation_flags_parse(self):

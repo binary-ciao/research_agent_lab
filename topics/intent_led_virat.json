@@ -82,6 +82,10 @@
   "metadata": {
     "created_from": "Intent-LED-mul-agent work.md",
     "version": "v1",
+    "enable_llm": true,
+    "enable_experiments": false,
+    "enable_code_writes": false,
+    "online": false,
     "literature": {
       "local_paper_dirs": [
         "C:/Users/duyul/Desktop/work/Essay/轨迹预测/EPC",
