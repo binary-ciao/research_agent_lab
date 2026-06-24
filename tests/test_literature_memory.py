@@ -485,6 +485,156 @@ class LiteratureMemoryPersistenceAgentTest(TestCase):
             result = agent.run(state, context)
             self.assertIn("skipped", result.notes[0])
 
+    def test_filter_excludes_unselected_papers_from_memory(self):
+        with TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "test.db"
+            lit_store = LiteratureMemoryStore(db_path)
+            agent = LiteratureMemoryPersistenceAgent(lit_memory_store=lit_store)
+
+            topic = _make_topic("test_filter")
+            state = ResearchState(topic=topic)
+            state.values["selected_papers"] = [
+                {
+                    "paper_id": "keep_me",
+                    "title": "Keep This Paper",
+                    "abstract": "good",
+                    "authors": [],
+                    "year": 2024,
+                    "keywords": [],
+                },
+            ]
+            state.values["parsed_papers"] = {
+                "keep_me": {"paper_id": "keep_me", "sections": []},
+                "discard_me": {"paper_id": "discard_me", "sections": []},
+            }
+            state.values["checked_evidence"] = [
+                {"evidence_id": "ev1", "paper_id": "keep_me", "claim_supported": "yes", "quote": "text", "section": "Method", "support_level": "strong"},
+                {"evidence_id": "ev2", "paper_id": "discard_me", "claim_supported": "yes", "quote": "text", "section": "Method", "support_level": "strong"},
+            ]
+            state.values["method_cards"] = [
+                {"method_card_id": "mc1", "paper_id": "keep_me", "task": "test", "datasets": [], "metrics": []},
+                {"method_card_id": "mc2", "paper_id": "discard_me", "task": "test", "datasets": [], "metrics": []},
+            ]
+            state.values["extracted_references"] = [
+                {"ref_id": "r1", "title": "Ref1", "source_paper_id": "keep_me"},
+                {"ref_id": "r2", "title": "Ref2", "source_paper_id": "discard_me"},
+            ]
+
+            context = _make_context(tmp)
+            agent.run(state, context)
+
+            papers = lit_store.retrieve_papers("test_filter", limit=10)
+            self.assertEqual(len(papers), 1)
+            self.assertEqual(papers[0]["paper_id"], "keep_me")
+
+            cards = lit_store.retrieve_method_cards("test_filter", limit=10)
+            self.assertEqual(len(cards), 1)
+            self.assertEqual(cards[0]["paper_id"], "keep_me")
+
+            evidence = lit_store.retrieve_evidence("test_filter", ["keep_me"], limit=10)
+            self.assertEqual(len(evidence), 1)
+            self.assertEqual(evidence[0]["paper_id"], "keep_me")
+
+    def test_filter_keeps_selected_papers_in_memory(self):
+        with TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "test.db"
+            lit_store = LiteratureMemoryStore(db_path)
+            agent = LiteratureMemoryPersistenceAgent(lit_memory_store=lit_store)
+
+            topic = _make_topic("test_keep")
+            state = ResearchState(topic=topic)
+            state.values["selected_papers"] = [
+                {
+                    "paper_id": "p1",
+                    "title": "Paper One",
+                    "abstract": "abstract one",
+                    "authors": [],
+                    "year": 2024,
+                    "keywords": [],
+                },
+                {
+                    "paper_id": "p2",
+                    "title": "Paper Two",
+                    "abstract": "abstract two",
+                    "authors": [],
+                    "year": 2024,
+                    "keywords": [],
+                },
+            ]
+            state.values["parsed_papers"] = {
+                "p1": {"paper_id": "p1", "sections": []},
+                "p2": {"paper_id": "p2", "sections": []},
+            }
+            state.values["checked_evidence"] = [
+                {"evidence_id": "ev1", "paper_id": "p1", "claim_supported": "yes", "quote": "text", "section": "Abstract", "support_level": "strong"},
+                {"evidence_id": "ev2", "paper_id": "p2", "claim_supported": "yes", "quote": "text", "section": "Method", "support_level": "strong"},
+            ]
+            state.values["method_cards"] = [
+                {"method_card_id": "mc1", "paper_id": "p1", "task": "test", "datasets": [], "metrics": []},
+                {"method_card_id": "mc2", "paper_id": "p2", "task": "test", "datasets": [], "metrics": []},
+            ]
+
+            context = _make_context(tmp)
+            agent.run(state, context)
+
+            papers = lit_store.retrieve_papers("test_keep", limit=10)
+            self.assertEqual(len(papers), 2)
+
+    def test_filter_filters_extracted_references_by_source_paper_id(self):
+        with TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "test.db"
+            lit_store = LiteratureMemoryStore(db_path)
+            agent = LiteratureMemoryPersistenceAgent(lit_memory_store=lit_store)
+
+            topic = _make_topic("test_ref")
+            state = ResearchState(topic=topic)
+            state.values["selected_papers"] = [
+                {
+                    "paper_id": "keep_me",
+                    "title": "Keep",
+                    "abstract": "yes",
+                    "authors": [],
+                    "year": 2024,
+                    "keywords": [],
+                },
+            ]
+            state.values["extracted_references"] = [
+                {"ref_id": "r1", "title": "Kept Ref", "source_paper_id": "keep_me"},
+                {"ref_id": "r2", "title": "Discarded Ref", "source_paper_id": "discard_me"},
+            ]
+
+            context = _make_context(tmp)
+            agent.run(state, context)
+
+            papers = lit_store.retrieve_papers("test_ref", limit=10)
+            self.assertEqual(len(papers), 1)
+
+    def test_filter_no_selected_papers_persists_all(self):
+        """When selected_papers is empty (no user selection), persist everything as before."""
+        with TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "test.db"
+            lit_store = LiteratureMemoryStore(db_path)
+            agent = LiteratureMemoryPersistenceAgent(lit_memory_store=lit_store)
+
+            topic = _make_topic("test_no_filter")
+            state = ResearchState(topic=topic)
+            state.values["selected_papers"] = []
+            state.values["parsed_papers"] = {
+                "p1": {"paper_id": "p1", "sections": []},
+            }
+            state.values["checked_evidence"] = [
+                {"evidence_id": "ev1", "paper_id": "p1", "claim_supported": "yes", "quote": "text", "section": "Method", "support_level": "strong"},
+            ]
+            state.values["method_cards"] = [
+                {"method_card_id": "mc1", "paper_id": "p1", "task": "test", "datasets": [], "metrics": []},
+            ]
+
+            context = _make_context(tmp)
+            agent.run(state, context)
+
+            cards = lit_store.retrieve_method_cards("test_no_filter", limit=10)
+            self.assertEqual(len(cards), 1)
+
 
 if __name__ == "__main__":
     main()

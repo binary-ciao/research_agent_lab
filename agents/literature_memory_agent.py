@@ -22,6 +22,7 @@ class LiteratureMemoryPersistenceAgent(Agent):
 
         scope = memory_scope_for_topic(state.topic.topic_name)
         state_values = _to_state_values(state)
+        state_values = _filter_by_selected(state_values)
         count = store.write_run_artifacts(state_values, scope)
 
         # Export Mermaid tree visualization
@@ -40,6 +41,38 @@ class LiteratureMemoryPersistenceAgent(Agent):
         return AgentResult(
             notes=[f"persisted {count} artifacts to cross-run literature memory (scope={scope})"],
         )
+
+
+def _filter_by_selected(state_values: dict) -> dict:
+    selected = state_values.get("selected_papers", [])
+    selected_ids = {p.get("paper_id", "") for p in selected if p.get("paper_id")}
+    if not selected_ids:
+        return state_values
+
+    filtered = dict(state_values)
+    filtered["selected_papers"] = selected
+
+    filtered["parsed_papers"] = {
+        pid: v for pid, v in state_values.get("parsed_papers", {}).items()
+        if pid in selected_ids
+    }
+
+    filtered["checked_evidence"] = [
+        e for e in state_values.get("checked_evidence", [])
+        if e.get("paper_id", "") in selected_ids
+    ]
+
+    filtered["method_cards"] = [
+        m for m in state_values.get("method_cards", [])
+        if m.get("paper_id", "") in selected_ids
+    ]
+
+    filtered["extracted_references"] = [
+        r for r in state_values.get("extracted_references", [])
+        if r.get("source_paper_id", "") in selected_ids
+    ]
+
+    return filtered
 
 
 def _to_state_values(state: ResearchState) -> dict:
